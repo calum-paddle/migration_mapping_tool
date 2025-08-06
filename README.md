@@ -43,7 +43,7 @@ Before running the setup, ensure you have:
 1. **Run the setup script** (recommended):
 
    ```bash
-   python setup.py
+   python3 setup.py
    ```
 
    This will install all dependencies automatically.
@@ -105,7 +105,7 @@ python3 -m pip install -r requirements.txt
 **Option 1: Use the startup script (recommended)**:
 
 ```bash
-python start.py
+python3 start.py
 ```
 
 This will start both the backend and frontend automatically.
@@ -115,7 +115,7 @@ This will start both the backend and frontend automatically.
 1. **Start the Flask backend**:
 
    ```bash
-   python server.py
+   python3 server.py
    ```
 
    The backend will run at `http://localhost:5001`
