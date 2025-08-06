@@ -165,24 +165,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         
         completed['card_holder_name'] = completed['card_holder_name'].fillna(completed['customer_full_name'])
     
-    # Merge the two datasets (fixed duplicate merge operation)
-    finaljoin = pd.merge(mappingdata,
-                        subscribedata,
-                        left_on='card_id', 
-                        right_on='card_id', 
-                        how='outer')
-    
-    finaljoin = finaljoin[finaljoin['card_id'].notna()]
-    
-    # Rename columns as required
-    completed = finaljoin.rename(columns={
-        'card.number': 'card_token',
-        'card.name': 'card_holder_name',
-        'card.exp_month': 'card_expiry_month',
-        'card.exp_year': 'card_expiry_year',
-    })
-    
-    completed['card_holder_name'] = completed['card_holder_name'].fillna(completed['customer_full_name'])
+    # Ensure card_holder_name is filled for both providers
+    if 'customer_full_name' in completed.columns:
+        completed['card_holder_name'] = completed['card_holder_name'].fillna(completed['customer_full_name'])
     
     # Remove unnecessary columns (same for both environments)
     columns_to_remove = [
