@@ -54,6 +54,10 @@ const DownloadLinks = ({ results }) => {
                 href={file.url} 
                 download={file.name}
                 className="download-button"
+                onClick={() => {
+                  console.log('Download clicked for:', file.name);
+                  console.log('Download URL:', file.url);
+                }}
               >
                 Download
               </a>

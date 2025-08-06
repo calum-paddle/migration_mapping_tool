@@ -97,7 +97,7 @@ def process_migration_api():
         
         # Update file URLs to be downloadable
         for file_info in results['output_files']:
-            file_info['url'] = f'/api/download/{file_info["name"]}'
+            file_info['url'] = f'http://localhost:5001/api/download/{file_info["name"]}'
         
         # Clean up uploaded files
         os.remove(subscriber_path)
@@ -113,11 +113,30 @@ def download_file(filename):
     """Download processed file"""
     try:
         file_path = os.path.join(app.config['OUTPUT_FOLDER'], filename)
+        print(f"Download request for: {filename}")
+        print(f"Looking for file: {file_path}")
+        print(f"File exists: {os.path.exists(file_path)}")
+        print(f"Absolute path: {os.path.abspath(file_path)}")
+        
         if os.path.exists(file_path):
+            print(f"File size: {os.path.getsize(file_path)} bytes")
+            print(f"File permissions: {oct(os.stat(file_path).st_mode)[-3:]}")
             return send_file(file_path, as_attachment=True)
         else:
+            # List all files in output directory for debugging
+            output_dir = app.config['OUTPUT_FOLDER']
+            print(f"Output directory: {output_dir}")
+            print(f"Output directory exists: {os.path.exists(output_dir)}")
+            if os.path.exists(output_dir):
+                files = os.listdir(output_dir)
+                print(f"Files in output directory: {files}")
+                print(f"Requested filename: {filename}")
+                print(f"Available files: {[f for f in files if f.endswith('.csv')]}")
+            else:
+                print(f"Output directory does not exist: {output_dir}")
             return jsonify({'error': 'File not found'}), 404
     except Exception as e:
+        print(f"Download error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/files', methods=['GET'])
