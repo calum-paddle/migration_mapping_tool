@@ -49,10 +49,31 @@ def check_npm():
 
 def install_python_dependencies():
     """Install Python dependencies"""
-    dependencies = ['pandas', 'flask', 'flask-cors', 'werkzeug']
+    dependencies = ['pandas', 'flask', 'flask-cors', 'werkzeug', 'requests']
+    
+    # Try different pip commands
+    pip_commands = ['pip', 'pip3', 'python -m pip', 'python3 -m pip']
+    pip_command = None
+    
+    for cmd in pip_commands:
+        try:
+            result = subprocess.run(f"{cmd} --version", shell=True, capture_output=True, text=True)
+            if result.returncode == 0:
+                pip_command = cmd
+                print(f"✓ Found pip: {cmd}")
+                break
+        except:
+            continue
+    
+    if not pip_command:
+        print("✗ pip not found. Please install pip first:")
+        print("  - macOS: brew install python")
+        print("  - Ubuntu/Debian: sudo apt-get install python3-pip")
+        print("  - Windows: Download from https://pip.pypa.io/")
+        return False
     
     for dep in dependencies:
-        if not run_command(f"pip install {dep}", f"Installing {dep}"):
+        if not run_command(f"{pip_command} install {dep}", f"Installing {dep}"):
             return False
     return True
 

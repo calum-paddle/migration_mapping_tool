@@ -31,6 +31,15 @@ A React-based frontend application for migrating data from Stripe to Paddle Bill
 
 ## Installation
 
+### Prerequisites
+
+Before running the setup, ensure you have:
+
+- **Python 3.7+** with pip
+- **Node.js 14+** with npm
+
+### Installation Steps
+
 1. **Run the setup script** (recommended):
 
    ```bash
@@ -52,6 +61,42 @@ A React-based frontend application for migrating data from Stripe to Paddle Bill
    ```bash
    pip install -r requirements.txt
    ```
+
+### Troubleshooting
+
+#### "pip: command not found" Error
+
+If you get this error, try these solutions:
+
+**macOS:**
+
+```bash
+# Using Homebrew
+brew install python
+
+# Or download from python.org
+```
+
+**Ubuntu/Debian:**
+
+```bash
+sudo apt-get update
+sudo apt-get install python3-pip
+```
+
+**Windows:**
+
+- Download Python from [python.org](https://www.python.org/downloads/)
+- Ensure "Add Python to PATH" is checked during installation
+
+**Alternative pip commands:**
+
+```bash
+# Try these if 'pip' doesn't work:
+pip3 install -r requirements.txt
+python -m pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
+```
 
 ## Usage
 
