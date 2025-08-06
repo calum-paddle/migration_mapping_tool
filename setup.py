@@ -111,7 +111,7 @@ def main():
     
     print("\n✅ Setup completed successfully!")
     print("\n🎉 You can now start the application with:")
-    print("   npm start")
+    print("   python3 start.py")
     print("\n📖 For more information, see README.md")
 
 if __name__ == "__main__":
