@@ -430,7 +430,7 @@ const FileUpload = ({ onProcessingComplete }) => {
         </div>
 
         <div className="form-group">
-          <label>Data Enhancement</label>
+          <label>Missing Zip Codes</label>
           <div className="toggle-container">
             <span className={!useMappingZipcodes ? 'active' : ''}>Use original data</span>
             <label className="switch">
