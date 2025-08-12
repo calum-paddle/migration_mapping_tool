@@ -55,6 +55,7 @@ def process_migration_api():
         vault_provider = request.form.get('vault_provider', '')
         is_sandbox = request.form.get('is_sandbox', 'false').lower() == 'true'
         provider = request.form.get('provider', 'stripe')
+        use_mapping_zipcodes = request.form.get('use_mapping_zipcodes', 'false').lower() == 'true'
         
         # Validate files
         if subscriber_file.filename == '':
@@ -92,7 +93,8 @@ def process_migration_api():
             vault_provider, 
             is_sandbox,
             provider,
-            seller_name
+            seller_name,
+            use_mapping_zipcodes
         )
         
         # Update file URLs to be downloadable

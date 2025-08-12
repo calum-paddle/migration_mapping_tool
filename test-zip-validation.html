@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Zip Code Validation Test</title>
+</head>
+<body>
+    <h1>Zip Code Validation Test</h1>
+    <p>This is a test to verify the zip code validation logic works correctly.</p>
+    
+    <script>
+        // Test the validation logic
+        function testZipValidation() {
+            const testCases = [
+                { country: 'US', zip: '1234', expected: 'missing_zero' },
+                { country: 'US', zip: '12345', expected: 'valid' },
+                { country: 'US', zip: '123', expected: 'incorrect_format' },
+                { country: 'US', zip: '123456', expected: 'incorrect_format' },
+                { country: 'US', zip: 'abc12', expected: 'incorrect_format' },
+                { country: 'US', zip: '', expected: 'valid' },
+                { country: 'CA', zip: '1234', expected: 'valid' }, // Non-US should be ignored
+                { country: 'US', zip: 'A1B2C', expected: 'incorrect_format' }
+            ];
+            
+            console.log('Testing zip code validation logic:');
+            
+            testCases.forEach((testCase, index) => {
+                const { country, zip, expected } = testCase;
+                let result = 'valid';
+                
+                if (country === 'US' && zip) {
+                    if (/^\d{4}$/.test(zip)) {
+                        result = 'missing_zero';
+                    } else if (!/^\d{5}$/.test(zip)) {
+                        result = 'incorrect_format';
+                    }
+                }
+                
+                const status = result === expected ? '✅ PASS' : '❌ FAIL';
+                console.log(`${status} Test ${index + 1}: Country=${country}, Zip=${zip}, Expected=${expected}, Got=${result}`);
+            });
+        }
+        
+        // Run the test
+        testZipValidation();
+    </script>
+</body>
+</html>

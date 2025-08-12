@@ -10,7 +10,65 @@ def generate_random_email():
     random_string = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
     return f"blackhole+{random_string}@paddle.com"
 
-def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name=''):
+def validate_and_fix_zipcode(postal_code, country_code):
+    """Validate and fix postal codes from mapping file data"""
+    if not postal_code or pd.isna(postal_code):
+        return postal_code
+    
+    postal_code = str(postal_code).strip()
+    
+    # Basic validation for all countries - ensure it's not completely invalid
+    if len(postal_code) < 2 or len(postal_code) > 10:
+        print(f"Warning: Postal code '{postal_code}' for {country_code} is too short or too long - skipping")
+        return None
+    
+    # Country-specific validation
+    if country_code == 'US':
+        # US zip codes: 5 digits or 4 digits (missing leading zero)
+        if len(postal_code) == 4 and postal_code.isdigit():
+            return '0' + postal_code
+        elif len(postal_code) == 5 and postal_code.isdigit():
+            return postal_code
+        else:
+            print(f"Warning: Invalid US postal code format '{postal_code}' from mapping file - skipping")
+            return None
+    
+    elif country_code == 'CA':
+        # Canadian postal codes: A1A 1A1 format (letters and numbers)
+        if len(postal_code) == 6 and postal_code[0].isalpha() and postal_code[1].isdigit() and postal_code[2].isalpha() and postal_code[3].isdigit() and postal_code[4].isalpha() and postal_code[5].isdigit():
+            return postal_code
+        elif len(postal_code) == 7 and postal_code[0].isalpha() and postal_code[1].isdigit() and postal_code[2].isalpha() and postal_code[3] == ' ' and postal_code[4].isdigit() and postal_code[5].isalpha() and postal_code[6].isdigit():
+            return postal_code
+        else:
+            print(f"Warning: Invalid Canadian postal code format '{postal_code}' from mapping file - skipping")
+            return None
+    
+    elif country_code == 'GB':
+        # UK postal codes: Various formats but should contain letters and numbers
+        if any(c.isalpha() for c in postal_code) and any(c.isdigit() for c in postal_code):
+            return postal_code
+        else:
+            print(f"Warning: Invalid UK postal code format '{postal_code}' from mapping file - skipping")
+            return None
+    
+    elif country_code == 'AU':
+        # Australian postal codes: 4 digits
+        if len(postal_code) == 4 and postal_code.isdigit():
+            return postal_code
+        else:
+            print(f"Warning: Invalid Australian postal code format '{postal_code}' from mapping file - skipping")
+            return None
+    
+    else:
+        # For other countries, do basic validation
+        # Must contain at least one letter or digit, and reasonable length
+        if any(c.isalnum() for c in postal_code):
+            return postal_code
+        else:
+            print(f"Warning: Invalid postal code format '{postal_code}' for {country_code} from mapping file - skipping")
+            return None
+
+def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', use_mapping_zipcodes=False):
     """
     Process migration from payment providers to Paddle Billing
     
@@ -75,11 +133,24 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         # File path
         mappingdata = pd.read_csv(mapping_file, encoding='latin-1')
     
+    print("=== MAPPING FILE DEBUG ===")
+    print(f"Mapping file columns (raw): {mappingdata.columns.tolist()}")
+    print(f"Mapping file shape: {mappingdata.shape}")
+    print("=== END MAPPING FILE DEBUG ===")
+    
     print(subscribedata)
     
     # Debug: Print available columns in subscriber file
     print("Available columns in subscriber file:")
     print(subscribedata.columns.tolist())
+    
+    # Check for required columns in subscriber file
+    required_subscriber_columns = ['card_token', 'customer_email', 'customer_full_name']
+    missing_subscriber_columns = [col for col in required_subscriber_columns if col not in subscribedata.columns]
+    
+    if missing_subscriber_columns:
+        print(f"Warning: Missing required subscriber columns: {missing_subscriber_columns}")
+        print("Available columns:", subscribedata.columns.tolist())
     
     # Provider-specific data processing
     if provider.lower() == 'bluesnap':
@@ -139,6 +210,14 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             columns_to_keep.append('card_expiry_year')
         if 'network_transaction_id' in mappingdata.columns:
             columns_to_keep.append('network_transaction_id')
+        
+        # Add postal code columns for mapping feature
+        if 'Zip Code' in mappingdata.columns:
+            columns_to_keep.append('Zip Code')
+        if 'Shipping Zip Code' in mappingdata.columns:
+            columns_to_keep.append('Shipping Zip Code')
+        if 'Billing Zip Code' in mappingdata.columns:
+            columns_to_keep.append('Billing Zip Code')
         
         print(f"Columns to keep: {columns_to_keep}")
         mappingdata = mappingdata[columns_to_keep]
@@ -213,28 +292,154 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     if 'customer_full_name' in completed.columns:
         completed['card_holder_name'] = completed['card_holder_name'].fillna(completed['customer_full_name'])
     
+    # Fill missing postal codes from mapping file if enabled
+    if use_mapping_zipcodes and 'address_postal_code' in completed.columns:
+        print("Filling missing postal codes from mapping file...")
+        print(f"Provider: {provider}")
+        print(f"Mapping file columns: {mappingdata.columns.tolist()}")
+        
+        # Create a mapping of card tokens to postal codes from mapping file
+        mapping_postal_codes = {}
+        
+        if provider.lower() == 'bluesnap':
+            # For Bluesnap, use the original credit card number as the key
+            if 'original_credit_card_number' in mappingdata.columns:
+                print("Processing Bluesnap mapping data...")
+                print(f"'Zip Code' column exists: {'Zip Code' in mappingdata.columns}")
+                if 'Zip Code' in mappingdata.columns:
+                    print(f"Sample 'Zip Code' values: {mappingdata['Zip Code'].head().tolist()}")
+                
+                for idx, row in mappingdata.iterrows():
+                    if pd.notna(row.get('original_credit_card_number')):
+                        # Look for postal code in mapping file - only check specific column
+                        postal_code = None
+                        
+                        # Check for the specific Bluesnap column name
+                        if 'Zip Code' in mappingdata.columns:
+                            raw_value = row['Zip Code']
+                            print(f"Row {idx}: Raw 'Zip Code' value: '{raw_value}' (type: {type(raw_value)})")
+                            
+                            if pd.notna(raw_value) and str(raw_value).strip() != '' and str(raw_value).strip() != '0':
+                                postal_code = str(raw_value).strip()
+                                print(f"Found postal code '{postal_code}' in column 'Zip Code' for card {row['original_credit_card_number']}")
+                            else:
+                                print(f"Row {idx}: Skipping empty/invalid postal code: '{raw_value}'")
+                        
+                        if postal_code:
+                            # Validate and fix the postal code from mapping file
+                            validated_postal_code = validate_and_fix_zipcode(postal_code, row.get('address_country_code', ''))
+                            print(f"Row {idx}: Original: '{postal_code}' -> Validated: '{validated_postal_code}'")
+                            if validated_postal_code is not None:
+                                mapping_postal_codes[str(row['original_credit_card_number'])] = validated_postal_code
+                                print(f"Added mapping: {row['original_credit_card_number']} -> {validated_postal_code}")
+        else:
+            # For Stripe, use card_id as the key
+            if 'card_id' in mappingdata.columns:
+                print("Processing Stripe mapping data...")
+                print(f"'card.address_zip' column exists: {'card.address_zip' in mappingdata.columns}")
+                if 'card.address_zip' in mappingdata.columns:
+                    print(f"Sample 'card.address_zip' values: {mappingdata['card.address_zip'].head().tolist()}")
+                
+                for idx, row in mappingdata.iterrows():
+                    if pd.notna(row.get('card_id')):
+                        # Look for postal code in mapping file - only check specific column
+                        postal_code = None
+                        
+                        # Check for the specific Stripe column name
+                        if 'card.address_zip' in mappingdata.columns:
+                            raw_value = row['card.address_zip']
+                            print(f"Row {idx}: Raw 'card.address_zip' value: '{raw_value}' (type: {type(raw_value)})")
+                            
+                            if pd.notna(raw_value) and str(raw_value).strip() != '' and str(raw_value).strip() != '0':
+                                postal_code = str(raw_value).strip()
+                                print(f"Found postal code '{postal_code}' in column 'card.address_zip' for card {row['card_id']}")
+                            else:
+                                print(f"Row {idx}: Skipping empty/invalid postal code: '{raw_value}'")
+                        
+                        if postal_code:
+                            # Validate and fix the postal code from mapping file
+                            validated_postal_code = validate_and_fix_zipcode(postal_code, row.get('address_country_code', ''))
+                            print(f"Row {idx}: Original: '{postal_code}' -> Validated: '{validated_postal_code}'")
+                            if validated_postal_code is not None:
+                                mapping_postal_codes[str(row['card_id'])] = validated_postal_code
+                                print(f"Added mapping: {row['card_id']} -> {validated_postal_code}")
+        
+        print(f"Created {len(mapping_postal_codes)} postal code mappings")
+        print(f"Mapping keys: {list(mapping_postal_codes.keys())[:5]}...")  # Show first 5 keys
+        
+        # Fill missing postal codes
+        filled_count = 0
+        missing_count = 0
+        for idx, row in completed.iterrows():
+            if pd.isna(row['address_postal_code']) or row['address_postal_code'] == '':
+                # Find the corresponding mapping key
+                mapping_key = None
+                if provider.lower() == 'bluesnap':
+                    mapping_key = str(row.get('card_token', ''))
+                else:
+                    mapping_key = str(row.get('card_id', ''))
+                
+                if mapping_key in mapping_postal_codes:
+                    completed.at[idx, 'address_postal_code'] = mapping_postal_codes[mapping_key]
+                    filled_count += 1
+                    print(f"Filled postal code for {mapping_key}: {mapping_postal_codes[mapping_key]}")
+                else:
+                    missing_count += 1
+                    if missing_count <= 5:  # Only show first 5 missing for debugging
+                        print(f"No mapping found for key: {mapping_key}")
+        
+        print(f"Filled {filled_count} missing postal codes from mapping file")
+        print(f"Could not find mapping for {missing_count} records")
+    
     print("Starting common processing...")
     
-    # Remove unnecessary columns (same for both environments)
-    columns_to_remove = [
-        'card_address_line1',
-        'card_address_line2',
-        'card_address_city',
-        'card_address_state',
-        'card_address_zip',
-        'card_address_country',
-        'default_source',
-        'email',
-        'id',
-        'card.address_zip', 
-        'card.address_state', 
-        'card.address_line2', 
-        'card.address_line1', 
-        'card.address_country', 
-        'card.address_city', 
-        'name', 
-        'description'
-    ]
+    # Remove unnecessary columns (provider-specific)
+    if provider.lower() == 'stripe':
+        # For Stripe, keep card.address_zip but remove other unwanted columns
+        columns_to_remove = [
+            'card_address_line1',
+            'card_address_line2', 
+            'card_address_city',
+            'card_address_state',
+            'card_address_zip',
+            'card_address_country',
+            'default_source',
+            'email',
+            'id',
+            'card.address_state', 
+            'card.address_line2', 
+            'card.address_line1', 
+            'card.address_country', 
+            'card.address_city', 
+            'name', 
+            'description'
+            # Note: card.address_zip is KEPT for Stripe output
+        ]
+    else:
+        # For Bluesnap, remove card.address_zip and other unwanted columns
+        columns_to_remove = [
+            'card_address_line1',
+            'card_address_line2',
+            'card_address_city',
+            'card_address_state',
+            'card_address_zip',
+            'card_address_country',
+            'default_source',
+            'email',
+            'id',
+            'card.address_zip',  # Remove for Bluesnap
+            'card.address_state', 
+            'card.address_line2', 
+            'card.address_line1', 
+            'card.address_country', 
+            'card.address_city', 
+            'name', 
+            'description',
+            # Remove postal code columns from mapping file (they were only used for filling missing values)
+            'Zip Code',
+            'Shipping Zip Code',
+            'Billing Zip Code'
+        ]
     
     columns_to_remove = [col for col in columns_to_remove if col in completed.columns]
     print(f"Removing columns: {columns_to_remove}")
@@ -248,11 +453,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     # Sandbox-specific data anonymization
     if is_sandbox:
-        # Generate random emails to anonymize data
+        # Generate random emails to anonymize data (only emails, keep real names)
         completed['customer_email'] = completed['customer_email'].apply(lambda x: generate_random_email())
         
-        # Anonymize customer name using customer external id
-        completed['customer_full_name'] = completed['customer_external_id']
+        # Keep the original customer_full_name from subscriber data (real customer name)
+        # No anonymization needed for names - use customer data, not card holder data
     
     print("Processing date formatting...")
     # Reformat 'current_period_started_at' to desired format
@@ -340,7 +545,17 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         if not df.empty:
             file_path = os.path.join(output_dir, filename)
             print(f"Saving file: {file_path}")
-            df.to_csv(file_path, index=False, float_format='%.0f')
+            
+            # Ensure zip codes are formatted as text to preserve leading zeros
+            df_to_save = df.copy()
+            if 'address_postal_code' in df_to_save.columns:
+                # Convert postal codes to strings with leading zeros preserved
+                df_to_save['address_postal_code'] = df_to_save['address_postal_code'].astype(str).str.zfill(5)
+            
+            # Save with proper formatting - use quoting=1 to force quotes around all fields
+            # This ensures Excel treats all fields as text, preserving leading zeros
+            df_to_save.to_csv(file_path, index=False, quoting=1)
+            
             file_size = os.path.getsize(file_path)
             print(f"File saved successfully. Size: {file_size} bytes")
             output_files.append({
