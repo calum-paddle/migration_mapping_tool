@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import './FileUpload.css';
 
 const FileUpload = ({ onProcessingComplete }) => {
   const [subscriberFile, setSubscriberFile] = useState(null);
@@ -21,6 +20,10 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [pendingSubscriberFile, setPendingSubscriberFile] = useState(null);
   const [pendingMappingFile, setPendingMappingFile] = useState(null);
   const [pendingFormData, setPendingFormData] = useState(null);
+
+  // New state for Bluesnap card_token validation
+  const [showCardTokenFormatModal, setShowCardTokenFormatModal] = useState(false);
+  const [cardTokenFormatIssues, setCardTokenFormatIssues] = useState([]);
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -116,6 +119,50 @@ const FileUpload = ({ onProcessingComplete }) => {
     });
   };
 
+  // New function to validate Bluesnap card_token format
+  const validateBluesnapCardTokens = async (file) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target.result;
+        const lines = text.split('\n');
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+        
+        // Find card_token column index
+        const cardTokenIndex = headers.findIndex(h => h.toLowerCase() === 'card_token');
+        
+        if (cardTokenIndex === -1) {
+          resolve({ hasIssues: false, issues: [] });
+          return;
+        }
+        
+        const issues = [];
+        
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          if (!line.trim()) continue;
+          
+          const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+          const cardToken = values[cardTokenIndex];
+          
+          if (cardToken) {
+            // Check if card_token is not exactly 13 numerical digits
+            if (!/^\d{13}$/.test(cardToken)) {
+              issues.push({
+                line: i + 1,
+                cardToken: cardToken,
+                type: 'incorrect_format'
+              });
+            }
+          }
+        }
+        
+        resolve({ hasIssues: issues.length > 0, issues });
+      };
+      reader.readAsText(file);
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -126,7 +173,7 @@ const FileUpload = ({ onProcessingComplete }) => {
 
     setIsProcessing(true);
     setError(null);
-    setProcessingStatus('Checking server connection...');
+    setProcessingStatus('Processing migration...');
 
     try {
       // Check if server is running
@@ -135,41 +182,32 @@ const FileUpload = ({ onProcessingComplete }) => {
         throw new Error('Backend server is not responding. Please ensure the Python server is running on port 5001.');
       }
       
-      setProcessingStatus('Validating US zip codes...');
-
-      // Validate US zip codes first
-      const zipValidation = await validateUSZipCodes(subscriberFile);
-      
-      if (zipValidation.hasIssues) {
-        // Store pending data
-        setPendingSubscriberFile(subscriberFile);
-        setPendingMappingFile(mappingFile);
-        setPendingFormData({ sellerName, vaultProvider, isSandbox, provider, useMappingZipcodes });
+      // Validate Bluesnap card_token format if provider is Bluesnap
+      if (provider === 'bluesnap') {
+        setProcessingStatus('Validating Bluesnap card tokens...');
+        const cardTokenValidation = await validateBluesnapCardTokens(subscriberFile);
         
-        // Separate issues by type
-        const missingZeroIssues = zipValidation.issues.filter(issue => issue.type === 'missing_zero');
-        const incorrectFormatIssues = zipValidation.issues.filter(issue => issue.type === 'incorrect_format');
-        
-        setMissingZeroIssues(missingZeroIssues);
-        setIncorrectFormatIssues(incorrectFormatIssues);
-        
-        // Show missing zero modal first if there are any
-        if (missingZeroIssues.length > 0) {
-          setShowMissingZeroModal(true);
-        } else if (incorrectFormatIssues.length > 0) {
-          setShowIncorrectFormatModal(true);
+        if (cardTokenValidation.hasIssues) {
+          // Store pending data
+          setPendingSubscriberFile(subscriberFile);
+          setPendingMappingFile(mappingFile);
+          setPendingFormData({ sellerName, vaultProvider, isSandbox, provider, useMappingZipcodes });
+          
+          // Set card token issues and show modal
+          setCardTokenFormatIssues(cardTokenValidation.issues);
+          setShowCardTokenFormatModal(true);
+          
+          setIsProcessing(false);
+          setProcessingStatus('');
+          return;
         }
-        
-        setIsProcessing(false);
-        setProcessingStatus('');
-        return;
       }
       
-              // No issues, proceed with normal processing
-        await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, useMappingZipcodes);
+      // Process the migration first (this will include mapping if toggle is enabled)
+      await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, useMappingZipcodes);
       
     } catch (err) {
-      setError('Error: ' + err.message);
+      setError('Error processing migration: ' + err.message);
       setIsProcessing(false);
       setProcessingStatus('');
     }
@@ -320,6 +358,25 @@ const FileUpload = ({ onProcessingComplete }) => {
     }
   };
 
+  // Function to handle card token format issues
+  const handleCardTokenFormatCorrection = async (action) => {
+    setShowCardTokenFormatModal(false);
+    
+    if (action === 'cancel') {
+      setIsProcessing(false);
+      setProcessingStatus('');
+      setError('Processing cancelled. Please correct the card token format issues and try again.');
+      return;
+    }
+    
+    if (action === 'correct') {
+      setIsProcessing(false);
+      setProcessingStatus('');
+      setError('Please correct the card token format issues in your file and try again.');
+      return;
+    }
+  };
+
   const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, useMappingZipcodes) => {
     const formData = new FormData();
     formData.append('subscriber_file', subFile);
@@ -413,35 +470,40 @@ const FileUpload = ({ onProcessingComplete }) => {
           </div>
         </div>
 
-        <div className="form-group">
-          <label>Environment</label>
-          <div className="toggle-container">
-            <span className={!isSandbox ? 'active' : ''}>Production</span>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={isSandbox}
-                onChange={(e) => setIsSandbox(e.target.checked)}
-              />
-              <span className="slider round"></span>
-            </label>
-            <span className={isSandbox ? 'active' : ''}>Sandbox</span>
+        <div className="toggle-group">
+          <div className="form-group">
+            <label>Environment</label>
+            <div className="toggle-container">
+              <span className={!isSandbox ? 'active' : ''}>Production</span>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={isSandbox}
+                  onChange={(e) => setIsSandbox(e.target.checked)}
+                />
+                <span className="slider round"></span>
+              </label>
+              <span className={isSandbox ? 'active' : ''}>Sandbox</span>
+            </div>
           </div>
-        </div>
 
-        <div className="form-group">
-          <label>Missing Zip Codes</label>
-          <div className="toggle-container">
-            <span className={!useMappingZipcodes ? 'active' : ''}>Use original data</span>
-            <label className="switch">
-              <input
-                type="checkbox"
-                checked={useMappingZipcodes}
-                onChange={(e) => setUseMappingZipcodes(e.target.checked)}
-              />
-              <span className="slider round"></span>
-            </label>
-            <span className={useMappingZipcodes ? 'active' : ''}>Use mapping zipcodes for missing fields</span>
+          <div className="form-group">
+            <label>Missing Zip Codes</label>
+            <div className="toggle-container">
+              <span className={!useMappingZipcodes ? 'active' : ''}>Use original data</span>
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  checked={useMappingZipcodes}
+                  onChange={(e) => setUseMappingZipcodes(e.target.checked)}
+                />
+                <span className="slider round"></span>
+              </label>
+              <span className={useMappingZipcodes ? 'active' : ''}>Use mapping zipcodes for missing fields</span>
+            </div>
+            <div className="toggle-description">
+              Fill missing postal codes from mapping file for: AU, CA, FR, DE, IN, IT, NL, ES, GB, US
+            </div>
           </div>
         </div>
 
@@ -467,7 +529,7 @@ const FileUpload = ({ onProcessingComplete }) => {
           />
         </div>
 
-        <button type="submit" disabled={isProcessing} className="submit-btn">
+        <button type="submit" disabled={isProcessing || !subscriberFile || !mappingFile} className="submit-btn">
           {isProcessing ? 'Processing...' : 'Process Migration'}
         </button>
       </form>
@@ -563,6 +625,45 @@ const FileUpload = ({ onProcessingComplete }) => {
                 onClick={() => handleIncorrectFormatCorrection('proceed')}
               >
                 Proceed Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Card Token Format Modal */}
+      {showCardTokenFormatModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-header">
+              <h3>Incorrect Bluesnap Card Token Format</h3>
+            </div>
+            <div className="modal-body">
+              <p>The following card tokens have incorrect format (should be exactly 13 numerical digits):</p>
+              <div className="zip-code-list">
+                {cardTokenFormatIssues.map((issue, index) => (
+                  <div key={index} className="zip-code-item">
+                    <span className="line-number">Line {issue.line}:</span>
+                    <span className="original-code">{issue.cardToken}</span>
+                    <span className="arrow">→</span>
+                    <span className="corrected-code needs-correction">Needs correction</span>
+                  </div>
+                ))}
+              </div>
+              <p>These card tokens need manual correction. Please fix them before proceeding.</p>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-secondary"
+                onClick={() => handleCardTokenFormatCorrection('cancel')}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => handleCardTokenFormatCorrection('correct')}
+              >
+                Correct
               </button>
             </div>
           </div>

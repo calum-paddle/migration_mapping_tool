@@ -5,6 +5,7 @@ import os
 import tempfile
 import importlib.util
 import sys
+import pandas as pd
 
 # Load the migration script dynamically
 spec = importlib.util.spec_from_file_location("migration_import_unified", "migration-import-unified.py")
@@ -174,6 +175,59 @@ def cleanup_files():
                     os.remove(os.path.join(output_dir, filename))
         
         return jsonify({'message': 'Files cleaned up successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/validate-zipcodes', methods=['POST'])
+def validate_zipcodes():
+    """Validate US zip codes in processed data"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Read the CSV file
+        df = pd.read_csv(file)
+        
+        # Check if required columns exist
+        if 'address_country_code' not in df.columns or 'address_postal_code' not in df.columns:
+            return jsonify({'error': 'Required columns not found'}), 400
+        
+        issues = []
+        
+        # Check each US postal code
+        for idx, row in df.iterrows():
+            country_code = row.get('address_country_code', '')
+            postal_code = row.get('address_postal_code', '')
+            
+            if country_code == 'US' and postal_code:
+                postal_code = str(postal_code).strip()
+                
+                # Check for 4-digit zip codes (missing leading zero)
+                if len(postal_code) == 4 and postal_code.isdigit():
+                    issues.append({
+                        'line': idx + 1,
+                        'postalCode': postal_code,
+                        'correctedCode': '0' + postal_code,
+                        'type': 'missing_zero'
+                    })
+                # Check for incorrect format (not 4 or 5 digits, or non-numeric)
+                elif not (len(postal_code) == 5 and postal_code.isdigit()):
+                    issues.append({
+                        'line': idx + 1,
+                        'postalCode': postal_code,
+                        'correctedCode': None,
+                        'type': 'incorrect_format'
+                    })
+        
+        return jsonify({
+            'hasIssues': len(issues) > 0,
+            'issues': issues
+        })
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

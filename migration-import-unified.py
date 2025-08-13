@@ -292,7 +292,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     if 'customer_full_name' in completed.columns:
         completed['card_holder_name'] = completed['card_holder_name'].fillna(completed['customer_full_name'])
     
-    # Fill missing postal codes from mapping file if enabled
+    # Fill missing postal codes from mapping file FIRST (if toggle enabled)
     if use_mapping_zipcodes and 'address_postal_code' in completed.columns:
         print("Filling missing postal codes from mapping file...")
         print(f"Provider: {provider}")
@@ -370,8 +370,18 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         # Fill missing postal codes
         filled_count = 0
         missing_count = 0
+        supported_countries = ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US']
+        
         for idx, row in completed.iterrows():
             if pd.isna(row['address_postal_code']) or row['address_postal_code'] == '':
+                # Only fill postal codes for supported countries
+                country_code = row.get('address_country_code', '')
+                if country_code not in supported_countries:
+                    missing_count += 1
+                    if missing_count <= 5:  # Only show first 5 missing for debugging
+                        print(f"Skipping unsupported country: {country_code}")
+                    continue
+                
                 # Find the corresponding mapping key
                 mapping_key = None
                 if provider.lower() == 'bluesnap':
@@ -382,14 +392,24 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 if mapping_key in mapping_postal_codes:
                     completed.at[idx, 'address_postal_code'] = mapping_postal_codes[mapping_key]
                     filled_count += 1
-                    print(f"Filled postal code for {mapping_key}: {mapping_postal_codes[mapping_key]}")
+                    print(f"Filled postal code for {mapping_key} ({country_code}): {mapping_postal_codes[mapping_key]}")
                 else:
                     missing_count += 1
                     if missing_count <= 5:  # Only show first 5 missing for debugging
-                        print(f"No mapping found for key: {mapping_key}")
+                        print(f"No mapping found for key: {mapping_key} (country: {country_code})")
         
         print(f"Filled {filled_count} missing postal codes from mapping file")
         print(f"Could not find mapping for {missing_count} records")
+        print(f"Supported countries for postal code mapping: {supported_countries}")
+    else:
+        # When toggle is not enabled, ensure postal codes remain blank/empty
+        if 'address_postal_code' in completed.columns:
+            print("Missing zip codes toggle is disabled - postal codes will remain as original")
+            # Ensure any '0' values in postal codes are converted back to empty strings
+            completed['address_postal_code'] = completed['address_postal_code'].replace('0', '')
+            # Also handle any other zero-like values
+            completed['address_postal_code'] = completed['address_postal_code'].replace(['0', '0.0', 0, 0.0], '')
+            print("Ensured postal codes remain blank when toggle is disabled")
     
     print("Starting common processing...")
     
@@ -549,8 +569,10 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             # Ensure zip codes are formatted as text to preserve leading zeros
             df_to_save = df.copy()
             if 'address_postal_code' in df_to_save.columns:
-                # Convert postal codes to strings with leading zeros preserved
-                df_to_save['address_postal_code'] = df_to_save['address_postal_code'].astype(str).str.zfill(5)
+                # Convert postal codes to strings to ensure proper CSV formatting
+                df_to_save['address_postal_code'] = df_to_save['address_postal_code'].astype(str)
+                # Convert empty strings back to empty (not "nan")
+                df_to_save['address_postal_code'] = df_to_save['address_postal_code'].replace(['nan', 'None'], '')
             
             # Save with proper formatting - use quoting=1 to force quotes around all fields
             # This ensures Excel treats all fields as text, preserving leading zeros
