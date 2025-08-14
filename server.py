@@ -6,6 +6,7 @@ import tempfile
 import importlib.util
 import sys
 import pandas as pd
+import json
 
 # Load the migration script dynamically
 spec = importlib.util.spec_from_file_location("migration_import_unified", "migration-import-unified.py")
@@ -57,6 +58,15 @@ def process_migration_api():
         is_sandbox = request.form.get('is_sandbox', 'false').lower() == 'true'
         provider = request.form.get('provider', 'stripe')
         use_mapping_zipcodes = request.form.get('use_mapping_zipcodes', 'false').lower() == 'true'
+        skip_validation_types = request.form.get('skip_validation_types', '')
+        
+        # Parse skip_validation_types from JSON string
+        skip_types = []
+        if skip_validation_types:
+            try:
+                skip_types = json.loads(skip_validation_types)
+            except:
+                skip_types = []
         
         # Validate files
         if subscriber_file.filename == '':
@@ -87,26 +97,31 @@ def process_migration_api():
         subscriber_file.save(subscriber_path)
         mapping_file.save(mapping_path)
         
-        # Process migration
-        results = process_migration(
+        # Call the migration processing function
+        result = process_migration(
             subscriber_path, 
             mapping_path, 
             vault_provider, 
-            is_sandbox,
-            provider,
-            seller_name,
-            use_mapping_zipcodes
+            is_sandbox, 
+            provider, 
+            seller_name, 
+            use_mapping_zipcodes,
+            skip_types
         )
         
+        # Check if validation is required
+        if result.get('validation_required'):
+            return jsonify(result)
+        
         # Update file URLs to be downloadable
-        for file_info in results['output_files']:
+        for file_info in result['output_files']:
             file_info['url'] = f'http://localhost:5001/api/download/{file_info["name"]}'
         
         # Clean up uploaded files
         os.remove(subscriber_path)
         os.remove(mapping_path)
         
-        return jsonify(results)
+        return jsonify(result)
         
     except Exception as e:
         return jsonify({'error': str(e)}), 500

@@ -4,6 +4,7 @@ import random
 import string
 import os
 import time
+import re
 
 def generate_random_email():
     """Generate a random email for sandbox data anonymization"""
@@ -68,7 +69,182 @@ def validate_and_fix_zipcode(postal_code, country_code):
             print(f"Warning: Invalid postal code format '{postal_code}' for {country_code} from mapping file - skipping")
             return None
 
-def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', use_mapping_zipcodes=False):
+def validate_postal_codes_after_merge(completed_df, provider='stripe'):
+    """
+    Validate postal codes, card tokens, and dates after merge (including those from mapping file)
+    Returns validation results for frontend display
+    """
+    from datetime import datetime
+    
+    validation_results = {
+        'us_missing_zero': [],
+        'us_incorrect_format': [],
+        'canadian_incorrect_format': [],
+        'bluesnap_card_token_format': [],
+        'date_validation_issues': []
+    }
+    
+    if 'address_postal_code' not in completed_df.columns or 'address_country_code' not in completed_df.columns:
+        return validation_results
+    
+    current_datetime = datetime.now()
+    
+    for idx, row in completed_df.iterrows():
+        country_code = row.get('address_country_code', '')
+        postal_code = row.get('address_postal_code', '')
+        
+        if not postal_code or pd.isna(postal_code):
+            continue
+            
+        postal_code = str(postal_code).strip()
+        
+        # US postal code validation
+        if country_code == 'US':
+            # Check for 4-digit zip codes (missing leading zero)
+            if len(postal_code) == 4 and postal_code.isdigit():
+                validation_results['us_missing_zero'].append({
+                    'line': idx + 1,
+                    'postalCode': postal_code,
+                    'correctedCode': '0' + postal_code
+                })
+            # Check for incorrect format (not 4 or 5 digits, or non-numeric)
+            elif not (len(postal_code) == 5 and postal_code.isdigit()):
+                validation_results['us_incorrect_format'].append({
+                    'line': idx + 1,
+                    'postalCode': postal_code
+                })
+        
+        # Canadian postal code validation
+        elif country_code == 'CA':
+            # Check if postal code doesn't match Canadian format (A1A 1A1 or A1A1A1)
+            import re
+            canadian_format = re.compile(r'^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$')
+            if not canadian_format.match(postal_code):
+                validation_results['canadian_incorrect_format'].append({
+                    'line': idx + 1,
+                    'postalCode': postal_code
+                })
+    
+    # Bluesnap card_token validation
+    if provider.lower() == 'bluesnap' and 'card_token' in completed_df.columns:
+        for idx, row in completed_df.iterrows():
+            card_token = row.get('card_token', '')
+            if card_token and not pd.isna(card_token):
+                card_token = str(card_token).strip()
+                # Check if card_token is not exactly 13 numerical digits
+                if not card_token.isdigit() or len(card_token) != 13:
+                    validation_results['bluesnap_card_token_format'].append({
+                        'line': idx + 1,
+                        'cardToken': card_token
+                    })
+    
+    # Date validation for both providers
+    print("Starting date validation...")
+    from datetime import timezone
+    current_datetime = datetime.now(timezone.utc)  # Make it timezone-aware with UTC
+    print(f"Current datetime: {current_datetime}")
+    print(f"Current datetime type: {type(current_datetime)}")
+    
+    for idx, row in completed_df.iterrows():
+        period_started = row.get('current_period_started_at')
+        period_ends = row.get('current_period_ends_at')
+        email = row.get('customer_email', 'No email')
+        
+        # Debug output for first few rows
+        if idx < 3:
+            print(f"Row {idx + 1}: period_started type: {type(period_started)}, value: {period_started}")
+            print(f"Row {idx + 1}: period_ends type: {type(period_ends)}, value: {period_ends}")
+            print(f"Row {idx + 1}: period_started isna: {pd.isna(period_started)}")
+            print(f"Row {idx + 1}: period_ends isna: {pd.isna(period_ends)}")
+        
+        # Validate current_period_started_at
+        if period_started and not pd.isna(period_started):
+            print(f"Processing period_started for row {idx + 1}: {period_started} (type: {type(period_started)})")
+            try:
+                # Handle different date formats
+                if isinstance(period_started, str):
+                    print(f"Converting string to datetime: {period_started}")
+                    period_started_dt = pd.to_datetime(period_started)
+                elif hasattr(period_started, 'to_pydatetime'):
+                    # Already a pandas datetime object
+                    print(f"Converting pandas datetime to pydatetime: {period_started}")
+                    period_started_dt = period_started.to_pydatetime()
+                else:
+                    # Try to convert to datetime
+                    print(f"Converting other type to datetime: {period_started}")
+                    period_started_dt = pd.to_datetime(period_started)
+                
+                print(f"Converted period_started_dt: {period_started_dt} (type: {type(period_started_dt)})")
+                print(f"Comparison: {period_started_dt} >= {current_datetime} = {period_started_dt >= current_datetime}")
+                
+                if period_started_dt >= current_datetime:
+                    print(f"Adding start_date_not_in_past issue for row {idx + 1}")
+                    validation_results['date_validation_issues'].append({
+                        'line': idx + 1,
+                        'field': 'current_period_started_at',
+                        'value': str(period_started),
+                        'email': email,
+                        'issue': 'start_date_not_in_past'
+                    })
+            except Exception as e:
+                print(f"Date parsing error for line {idx + 1}, period_started: {period_started}, error: {e}")
+                print(f"Error type: {type(e)}")
+                validation_results['date_validation_issues'].append({
+                    'line': idx + 1,
+                    'field': 'current_period_started_at',
+                    'value': str(period_started),
+                    'email': email,
+                    'issue': 'invalid_date_format'
+                })
+        
+        # Validate current_period_ends_at
+        if period_ends and not pd.isna(period_ends):
+            print(f"Processing period_ends for row {idx + 1}: {period_ends} (type: {type(period_ends)})")
+            try:
+                # Handle different date formats
+                if isinstance(period_ends, str):
+                    print(f"Converting string to datetime: {period_ends}")
+                    period_ends_dt = pd.to_datetime(period_ends)
+                elif hasattr(period_ends, 'to_pydatetime'):
+                    # Already a pandas datetime object
+                    print(f"Converting pandas datetime to pydatetime: {period_ends}")
+                    period_ends_dt = period_ends.to_pydatetime()
+                else:
+                    # Try to convert to datetime
+                    print(f"Converting other type to datetime: {period_ends}")
+                    period_ends_dt = pd.to_datetime(period_ends)
+                
+                print(f"Converted period_ends_dt: {period_ends_dt} (type: {type(period_ends_dt)})")
+                print(f"Comparison: {period_ends_dt} <= {current_datetime} = {period_ends_dt <= current_datetime}")
+                
+                if period_ends_dt <= current_datetime:
+                    print(f"Adding end_date_not_in_future issue for row {idx + 1}")
+                    validation_results['date_validation_issues'].append({
+                        'line': idx + 1,
+                        'field': 'current_period_ends_at',
+                        'value': str(period_ends),
+                        'email': email,
+                        'issue': 'end_date_not_in_future'
+                    })
+            except Exception as e:
+                print(f"Date parsing error for line {idx + 1}, period_ends: {period_ends}, error: {e}")
+                print(f"Error type: {type(e)}")
+                validation_results['date_validation_issues'].append({
+                    'line': idx + 1,
+                    'field': 'current_period_ends_at',
+                    'value': str(period_ends),
+                    'email': email,
+                    'issue': 'invalid_date_format'
+                })
+    
+    print(f"Date validation complete. Found {len(validation_results['date_validation_issues'])} issues.")
+    print(f"Issues breakdown:")
+    for issue_type in ['start_date_not_in_past', 'end_date_not_in_future', 'invalid_date_format']:
+        count = sum(1 for issue in validation_results['date_validation_issues'] if issue['issue'] == issue_type)
+        print(f"  {issue_type}: {count}")
+    return validation_results
+
+def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', use_mapping_zipcodes=False, skip_validation_types=None):
     """
     Process migration from payment providers to Paddle Billing
     
@@ -79,6 +255,8 @@ def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=
         is_sandbox: Boolean indicating if this is sandbox mode
         provider: String indicating the payment provider ('stripe' or 'bluesnap')
         seller_name: Name of the seller for file naming
+        use_mapping_zipcodes: Boolean to enable filling missing postal codes from mapping file
+        skip_validation_types: List of validation types to skip (e.g., ['canadian_incorrect_format', 'date_validation_issues'])
     
     Returns:
         dict: Processing results and file information
@@ -326,12 +504,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                 print(f"Row {idx}: Skipping empty/invalid postal code: '{raw_value}'")
                         
                         if postal_code:
-                            # Validate and fix the postal code from mapping file
-                            validated_postal_code = validate_and_fix_zipcode(postal_code, row.get('address_country_code', ''))
-                            print(f"Row {idx}: Original: '{postal_code}' -> Validated: '{validated_postal_code}'")
-                            if validated_postal_code is not None:
-                                mapping_postal_codes[str(row['original_credit_card_number'])] = validated_postal_code
-                                print(f"Added mapping: {row['original_credit_card_number']} -> {validated_postal_code}")
+                            # Use postal code from mapping file as-is (no validation/fixing)
+                            mapping_postal_codes[str(row['original_credit_card_number'])] = postal_code
+                            print(f"Added mapping: {row['original_credit_card_number']} -> {postal_code}")
         else:
             # For Stripe, use card_id as the key
             if 'card_id' in mappingdata.columns:
@@ -357,12 +532,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                 print(f"Row {idx}: Skipping empty/invalid postal code: '{raw_value}'")
                         
                         if postal_code:
-                            # Validate and fix the postal code from mapping file
-                            validated_postal_code = validate_and_fix_zipcode(postal_code, row.get('address_country_code', ''))
-                            print(f"Row {idx}: Original: '{postal_code}' -> Validated: '{validated_postal_code}'")
-                            if validated_postal_code is not None:
-                                mapping_postal_codes[str(row['card_id'])] = validated_postal_code
-                                print(f"Added mapping: {row['card_id']} -> {validated_postal_code}")
+                            # Use postal code from mapping file as-is (no validation/fixing)
+                            mapping_postal_codes[str(row['card_id'])] = postal_code
+                            print(f"Added mapping: {row['card_id']} -> {postal_code}")
         
         print(f"Created {len(mapping_postal_codes)} postal code mappings")
         print(f"Mapping keys: {list(mapping_postal_codes.keys())[:5]}...")  # Show first 5 keys
@@ -412,6 +584,52 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             print("Ensured postal codes remain blank when toggle is disabled")
     
     print("Starting common processing...")
+    
+    # Validate postal codes after merge (including those from mapping file)
+    print("Validating postal codes after merge...")
+    postal_validation_results = validate_postal_codes_after_merge(completed, provider)
+    
+    print("DEBUG: Initial validation results:")
+    for key, value in postal_validation_results.items():
+        print(f"  {key}: {len(value)} issues")
+    
+    # Filter out validation types that should be skipped
+    if skip_validation_types:
+        print(f"DEBUG: Skipping validation types: {skip_validation_types}")
+        for validation_type in skip_validation_types:
+            if validation_type in postal_validation_results:
+                postal_validation_results[validation_type] = []
+                print(f"Skipping validation for: {validation_type}")
+    
+    print("DEBUG: Final validation results after skipping:")
+    for key, value in postal_validation_results.items():
+        print(f"  {key}: {len(value)} issues")
+    
+    # Check if there are any validation issues
+    has_validation_issues = (
+        len(postal_validation_results['us_missing_zero']) > 0 or
+        len(postal_validation_results['us_incorrect_format']) > 0 or
+        len(postal_validation_results['canadian_incorrect_format']) > 0 or
+        len(postal_validation_results['bluesnap_card_token_format']) > 0 or
+        len(postal_validation_results['date_validation_issues']) > 0
+    )
+    
+    if has_validation_issues:
+        print("Validation issues found:")
+        print(f"US missing zero: {len(postal_validation_results['us_missing_zero'])}")
+        print(f"US incorrect format: {len(postal_validation_results['us_incorrect_format'])}")
+        print(f"Canadian incorrect format: {len(postal_validation_results['canadian_incorrect_format'])}")
+        print(f"Bluesnap card token format: {len(postal_validation_results['bluesnap_card_token_format'])}")
+        print(f"Date validation issues: {len(postal_validation_results['date_validation_issues'])}")
+        
+        # Return validation results for frontend to handle
+        return {
+            'validation_required': True,
+            'postal_validation_results': postal_validation_results,
+            'message': 'Validation required before processing'
+        }
+    else:
+        print("Skipping validation as requested by user")
     
     # Remove unnecessary columns (provider-specific)
     if provider.lower() == 'stripe':

@@ -310,6 +310,12 @@ input:checked + .slider:before {
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
+.date-validation-modal {
+  max-width: 800px;
+  width: 98%;
+  max-height: 95vh;
+}
+
 .modal-header {
   padding: 1.5rem 1.5rem 0;
   border-bottom: 1px solid #e2e8f0;
@@ -320,6 +326,11 @@ input:checked + .slider:before {
   color: #1a1a1a;
   font-size: 1.25rem;
   font-weight: 600;
+}
+
+.issue-count {
+  color: #dc2626;
+  font-weight: 700;
 }
 
 .modal-body {
@@ -362,6 +373,13 @@ input:checked + .slider:before {
   border-bottom: none;
 }
 
+.email-info {
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: #666;
+  font-style: italic;
+}
+
 .line-number {
   color: #666;
   font-size: 0.75rem;
@@ -396,7 +414,7 @@ input:checked + .slider:before {
   padding: 0 1.5rem 1.5rem;
   display: flex;
   gap: 0.75rem;
-  justify-content: flex-end;
+  justify-content: center;
 }
 
 .modal-footer.three-buttons {

@@ -17,13 +17,19 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [showIncorrectFormatModal, setShowIncorrectFormatModal] = useState(false);
   const [missingZeroIssues, setMissingZeroIssues] = useState([]);
   const [incorrectFormatIssues, setIncorrectFormatIssues] = useState([]);
-  const [pendingSubscriberFile, setPendingSubscriberFile] = useState(null);
-  const [pendingMappingFile, setPendingMappingFile] = useState(null);
   const [pendingFormData, setPendingFormData] = useState(null);
 
   // New state for Bluesnap card_token validation
   const [showCardTokenFormatModal, setShowCardTokenFormatModal] = useState(false);
   const [cardTokenFormatIssues, setCardTokenFormatIssues] = useState([]);
+
+  // New state for Canadian postal code validation
+  const [showCanadianPostalModal, setShowCanadianPostalModal] = useState(false);
+  const [canadianPostalIssues, setCanadianPostalIssues] = useState([]);
+
+  // New state for date validation
+  const [showDateValidationModal, setShowDateValidationModal] = useState(false);
+  const [dateValidationIssues, setDateValidationIssues] = useState([]);
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -163,6 +169,53 @@ const FileUpload = ({ onProcessingComplete }) => {
     });
   };
 
+  // New function to validate Canadian postal codes
+  const validateCanadianPostalCodes = async (file) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const text = e.target.result;
+        const lines = text.split('\n');
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+        
+        // Find column indices
+        const countryCodeIndex = headers.findIndex(h => h.toLowerCase() === 'address_country_code');
+        const postalCodeIndex = headers.findIndex(h => h.toLowerCase() === 'address_postal_code');
+        
+        if (countryCodeIndex === -1 || postalCodeIndex === -1) {
+          resolve({ hasIssues: false, issues: [] });
+          return;
+        }
+        
+        const issues = [];
+        
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          if (!line.trim()) continue;
+          
+          const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+          const countryCode = values[countryCodeIndex];
+          const postalCode = values[postalCodeIndex];
+          
+          if (countryCode === 'CA' && postalCode) {
+            // Check if postal code doesn't match Canadian format (A1A 1A1 or A1A1A1)
+            const canadianFormat = /^[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d$/;
+            if (!canadianFormat.test(postalCode)) {
+              issues.push({
+                line: i + 1,
+                postalCode: postalCode,
+                type: 'incorrect_format'
+              });
+            }
+          }
+        }
+        
+        resolve({ hasIssues: issues.length > 0, issues });
+      };
+      reader.readAsText(file);
+    });
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -182,28 +235,7 @@ const FileUpload = ({ onProcessingComplete }) => {
         throw new Error('Backend server is not responding. Please ensure the Python server is running on port 5001.');
       }
       
-      // Validate Bluesnap card_token format if provider is Bluesnap
-      if (provider === 'bluesnap') {
-        setProcessingStatus('Validating Bluesnap card tokens...');
-        const cardTokenValidation = await validateBluesnapCardTokens(subscriberFile);
-        
-        if (cardTokenValidation.hasIssues) {
-          // Store pending data
-          setPendingSubscriberFile(subscriberFile);
-          setPendingMappingFile(mappingFile);
-          setPendingFormData({ sellerName, vaultProvider, isSandbox, provider, useMappingZipcodes });
-          
-          // Set card token issues and show modal
-          setCardTokenFormatIssues(cardTokenValidation.issues);
-          setShowCardTokenFormatModal(true);
-          
-          setIsProcessing(false);
-          setProcessingStatus('');
-          return;
-        }
-      }
-      
-      // Process the migration first (this will include mapping if toggle is enabled)
+      // Process the migration (validation will be handled by backend after mapping)
       await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, useMappingZipcodes);
       
     } catch (err) {
@@ -225,13 +257,10 @@ const FileUpload = ({ onProcessingComplete }) => {
     }
     
     if (action === 'ignore') {
-      // Check if there are incorrect format issues to show next
-      if (incorrectFormatIssues.length > 0) {
-        setShowIncorrectFormatModal(true);
-      } else {
-        // No more issues, proceed with processing
-        await processFiles(pendingSubscriberFile, pendingMappingFile, pendingFormData.sellerName, pendingFormData.vaultProvider, pendingFormData.isSandbox, pendingFormData.provider, pendingFormData.useMappingZipcodes);
-      }
+      // Add US missing zero to the list of skipped types and continue with next validation
+      const currentSkippedTypes = pendingFormData.skippedTypes || [];
+      const skippedTypes = [...currentSkippedTypes, 'us_missing_zero'];
+      await processFiles(pendingFormData.subscriberFile, pendingFormData.mappingFile, pendingFormData.sellerName, pendingFormData.vaultProvider, pendingFormData.isSandbox, pendingFormData.provider, pendingFormData.useMappingZipcodes, skippedTypes);
       return;
     }
     
@@ -272,21 +301,16 @@ const FileUpload = ({ onProcessingComplete }) => {
           }
           
           const correctedText = correctedLines.join('\n');
-          const correctedFile = new File([correctedText], pendingSubscriberFile.name, {
+          const correctedFile = new File([correctedText], pendingFormData.subscriberFile.name, {
             type: 'text/csv'
           });
           
-          // Check if there are incorrect format issues to show next
-          if (incorrectFormatIssues.length > 0) {
-            setShowIncorrectFormatModal(true);
-            setIsProcessing(false);
-            setProcessingStatus('');
-          } else {
-            // No more issues, proceed with processing
-            await processFiles(correctedFile, pendingMappingFile, pendingFormData.sellerName, pendingFormData.vaultProvider, pendingFormData.isSandbox, pendingFormData.provider, pendingFormData.useMappingZipcodes);
-          }
+          // Add US missing zero to the list of skipped types and continue with next validation
+          const currentSkippedTypes = pendingFormData.skippedTypes || [];
+          const skippedTypes = [...currentSkippedTypes, 'us_missing_zero'];
+          await processFiles(correctedFile, pendingFormData.mappingFile, pendingFormData.sellerName, pendingFormData.vaultProvider, pendingFormData.isSandbox, pendingFormData.provider, pendingFormData.useMappingZipcodes, skippedTypes);
         };
-        reader.readAsText(pendingSubscriberFile);
+        reader.readAsText(pendingFormData.subscriberFile);
       } catch (err) {
         setError('Error correcting zip codes: ' + err.message);
         setIsProcessing(false);
@@ -308,7 +332,7 @@ const FileUpload = ({ onProcessingComplete }) => {
     
     if (action === 'proceed') {
       // Use the corrected file if it exists, otherwise use original
-      let fileToProcess = pendingSubscriberFile;
+      let fileToProcess = pendingFormData.subscriberFile;
       
       // Check if we have a corrected file from missing zero fixes
       if (missingZeroIssues.length > 0) {
@@ -344,16 +368,22 @@ const FileUpload = ({ onProcessingComplete }) => {
           }
           
           const correctedText = correctedLines.join('\n');
-          const correctedFile = new File([correctedText], pendingSubscriberFile.name, {
+          const correctedFile = new File([correctedText], pendingFormData.subscriberFile.name, {
             type: 'text/csv'
           });
           
-          await processFiles(correctedFile, pendingMappingFile, pendingFormData.sellerName, pendingFormData.vaultProvider, pendingFormData.isSandbox, pendingFormData.provider, pendingFormData.useMappingZipcodes);
+          // Add US incorrect format to the list of skipped types
+          const currentSkippedTypes = pendingFormData.skippedTypes || [];
+          const skippedTypes = [...currentSkippedTypes, 'us_incorrect_format'];
+          await processFiles(correctedFile, pendingFormData.mappingFile, pendingFormData.sellerName, pendingFormData.vaultProvider, pendingFormData.isSandbox, pendingFormData.provider, pendingFormData.useMappingZipcodes, skippedTypes);
         };
-        reader.readAsText(pendingSubscriberFile);
+        reader.readAsText(pendingFormData.subscriberFile);
       } else {
         // No missing zero issues, proceed with original file
-        await processFiles(fileToProcess, pendingMappingFile, pendingFormData.sellerName, pendingFormData.vaultProvider, pendingFormData.isSandbox, pendingFormData.provider, pendingFormData.useMappingZipcodes);
+        // Add US incorrect format to the list of skipped types
+        const currentSkippedTypes = pendingFormData.skippedTypes || [];
+        const skippedTypes = [...currentSkippedTypes, 'us_incorrect_format'];
+        await processFiles(fileToProcess, pendingFormData.mappingFile, pendingFormData.sellerName, pendingFormData.vaultProvider, pendingFormData.isSandbox, pendingFormData.provider, pendingFormData.useMappingZipcodes, skippedTypes);
       }
     }
   };
@@ -377,7 +407,47 @@ const FileUpload = ({ onProcessingComplete }) => {
     }
   };
 
-  const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, useMappingZipcodes) => {
+  // Function to handle Canadian postal code format issues
+  const handleCanadianPostalCorrection = async (action) => {
+    setShowCanadianPostalModal(false);
+    
+    if (action === 'cancel') {
+      setIsProcessing(false);
+      setProcessingStatus('');
+      setError('Processing cancelled. Please correct the Canadian postal code format issues and try again.');
+      return;
+    }
+    
+    if (action === 'proceed') {
+      // Proceed with processing despite Canadian postal code issues
+      // Add Canadian validation to the list of skipped types
+      const currentSkippedTypes = pendingFormData.skippedTypes || [];
+      const skippedTypes = [...currentSkippedTypes, 'canadian_incorrect_format'];
+      await processFiles(pendingFormData.subscriberFile, pendingFormData.mappingFile, pendingFormData.sellerName, pendingFormData.vaultProvider, pendingFormData.isSandbox, pendingFormData.provider, pendingFormData.useMappingZipcodes, skippedTypes);
+    }
+  };
+
+  // Function to handle date validation issues
+  const handleDateValidationCorrection = async (action) => {
+    setShowDateValidationModal(false);
+    
+    if (action === 'cancel') {
+      setIsProcessing(false);
+      setProcessingStatus('');
+      setError('Processing cancelled. Please correct the date validation issues and try again.');
+      return;
+    }
+    
+    if (action === 'proceed') {
+      // Proceed with processing despite date issues
+      // Add date validation to the list of skipped types
+      const currentSkippedTypes = pendingFormData.skippedTypes || [];
+      const skippedTypes = [...currentSkippedTypes, 'date_validation_issues'];
+      await processFiles(pendingFormData.subscriberFile, pendingFormData.mappingFile, pendingFormData.sellerName, pendingFormData.vaultProvider, pendingFormData.isSandbox, pendingFormData.provider, pendingFormData.useMappingZipcodes, skippedTypes);
+    }
+  };
+
+  const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, useMappingZipcodes, skipValidationTypes = []) => {
     const formData = new FormData();
     formData.append('subscriber_file', subFile);
     formData.append('mapping_file', mapFile);
@@ -386,6 +456,7 @@ const FileUpload = ({ onProcessingComplete }) => {
     formData.append('is_sandbox', sandbox);
     formData.append('provider', prov);
     formData.append('use_mapping_zipcodes', useMappingZipcodes);
+    formData.append('skip_validation_types', JSON.stringify(skipValidationTypes));
 
     try {
       setProcessingStatus('Uploading files...');
@@ -414,6 +485,78 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
 
       const result = await response.json();
+      
+      // Check if validation is required
+      if (result.validation_required) {
+        console.log("DEBUG: Validation required, processing results...");
+        const validationResults = result.postal_validation_results;
+        console.log("DEBUG: Validation results received:", validationResults);
+        
+        // Get the current skipped types from the request
+        const currentSkippedTypes = skipValidationTypes || [];
+        
+        // Store pending data for subsequent processing
+        setPendingFormData({
+          subscriberFile: subFile,
+          mappingFile: mapFile,
+          sellerName: seller,
+          vaultProvider: vault,
+          isSandbox: sandbox,
+          provider: prov,
+          useMappingZipcodes,
+          skippedTypes: currentSkippedTypes 
+        });
+        
+        // Show validation modals in order
+        let modalShown = false;
+        
+        console.log("DEBUG: Checking US missing zero:", validationResults.us_missing_zero?.length);
+        if (validationResults.us_missing_zero && validationResults.us_missing_zero.length > 0) {
+          console.log("DEBUG: Showing US missing zero modal");
+          setMissingZeroIssues(validationResults.us_missing_zero);
+          setShowMissingZeroModal(true);
+          modalShown = true;
+        }
+        
+        console.log("DEBUG: Checking US incorrect format:", validationResults.us_incorrect_format?.length);
+        if (!modalShown && validationResults.us_incorrect_format && validationResults.us_incorrect_format.length > 0) {
+          console.log("DEBUG: Showing US incorrect format modal");
+          setIncorrectFormatIssues(validationResults.us_incorrect_format);
+          setShowIncorrectFormatModal(true);
+          modalShown = true;
+        }
+        
+        console.log("DEBUG: Checking Canadian incorrect format:", validationResults.canadian_incorrect_format?.length);
+        if (!modalShown && validationResults.canadian_incorrect_format && validationResults.canadian_incorrect_format.length > 0) {
+          console.log("DEBUG: Showing Canadian incorrect format modal");
+          setCanadianPostalIssues(validationResults.canadian_incorrect_format);
+          setShowCanadianPostalModal(true);
+          modalShown = true;
+        }
+        
+        console.log("DEBUG: Checking Bluesnap card token format:", validationResults.bluesnap_card_token_format?.length);
+        if (!modalShown && validationResults.bluesnap_card_token_format && validationResults.bluesnap_card_token_format.length > 0) {
+          console.log("DEBUG: Showing Bluesnap card token format modal");
+          setCardTokenFormatIssues(validationResults.bluesnap_card_token_format);
+          setShowCardTokenFormatModal(true);
+          modalShown = true;
+        }
+        
+        console.log("DEBUG: Checking date validation issues:", validationResults.date_validation_issues?.length);
+        if (!modalShown && validationResults.date_validation_issues && validationResults.date_validation_issues.length > 0) {
+          console.log("DEBUG: Showing date validation modal");
+          setDateValidationIssues(validationResults.date_validation_issues);
+          setShowDateValidationModal(true);
+          modalShown = true;
+        }
+        
+        console.log("DEBUG: Modal shown:", modalShown);
+        
+        setIsProcessing(false);
+        setProcessingStatus('');
+        return;
+      }
+      
       onProcessingComplete(result);
       setProcessingStatus('Processing completed successfully!');
     } catch (err) {
@@ -512,7 +655,7 @@ const FileUpload = ({ onProcessingComplete }) => {
           <input
             type="file"
             id="subscriberFile"
-            accept=".csv"
+            accept=".csv,.txt,text/csv,text/plain"
             onChange={(e) => handleFileChange(e, 'subscriber')}
             required
           />
@@ -523,7 +666,7 @@ const FileUpload = ({ onProcessingComplete }) => {
           <input
             type="file"
             id="mappingFile"
-            accept=".csv"
+            accept=".csv,.txt,text/csv,text/plain"
             onChange={(e) => handleFileChange(e, 'mapping')}
             required
           />
@@ -552,7 +695,7 @@ const FileUpload = ({ onProcessingComplete }) => {
         <div className="modal-overlay">
           <div className="modal">
             <div className="modal-header">
-              <h3>Potential Missing Leading Zeros for US Zip Codes</h3>
+              <h3>Potential Missing Leading Zeros for US Zip Codes <span className="issue-count">({missingZeroIssues.length})</span></h3>
             </div>
             <div className="modal-body">
               <p>The following US zip codes appear to be missing leading zeros:</p>
@@ -597,7 +740,7 @@ const FileUpload = ({ onProcessingComplete }) => {
         <div className="modal-overlay">
           <div className="modal">
             <div className="modal-header">
-              <h3>Incorrect US Zip Code Format</h3>
+              <h3>Incorrect US Zip Code Format <span className="issue-count">({incorrectFormatIssues.length})</span></h3>
             </div>
             <div className="modal-body">
               <p>The following US zip codes have incorrect format (should be 5 digits):</p>
@@ -636,7 +779,7 @@ const FileUpload = ({ onProcessingComplete }) => {
         <div className="modal-overlay">
           <div className="modal">
             <div className="modal-header">
-              <h3>Incorrect Bluesnap Card Token Format</h3>
+              <h3>Incorrect Bluesnap Card Token Format <span className="issue-count">({cardTokenFormatIssues.length})</span></h3>
             </div>
             <div className="modal-body">
               <p>The following card tokens have incorrect format (should be exactly 13 numerical digits):</p>
@@ -664,6 +807,92 @@ const FileUpload = ({ onProcessingComplete }) => {
                 onClick={() => handleCardTokenFormatCorrection('correct')}
               >
                 Correct
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Canadian Postal Code Modal */}
+      {showCanadianPostalModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-header">
+              <h3>Incorrect Canadian Postal Code Format <span className="issue-count">({canadianPostalIssues.length})</span></h3>
+            </div>
+            <div className="modal-body">
+              <p>The following Canadian postal codes have incorrect format (should be A1A 1A1 or A1A1A1):</p>
+              <div className="zip-code-list">
+                {canadianPostalIssues.map((issue, index) => (
+                  <div key={index} className="zip-code-item">
+                    <span className="line-number">Line {issue.line}:</span>
+                    <span className="original-code">{issue.postalCode}</span>
+                    <span className="arrow">→</span>
+                    <span className="corrected-code needs-correction">Needs correction</span>
+                  </div>
+                ))}
+              </div>
+              <p>These postal codes need manual correction. Would you like to cancel and fix them?</p>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-secondary"
+                onClick={() => handleCanadianPostalCorrection('cancel')}
+              >
+                Cancel and Correct
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => handleCanadianPostalCorrection('proceed')}
+              >
+                Proceed Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Date Validation Modal */}
+      {showDateValidationModal && (
+        <div className="modal-overlay">
+          <div className="modal date-validation-modal">
+            <div className="modal-header">
+              <h3>Date Validation Issues <span className="issue-count">({dateValidationIssues.length})</span></h3>
+            </div>
+            <div className="modal-body">
+              <p>The following records have date validation issues:</p>
+              <div className="zip-code-list">
+                {dateValidationIssues.map((issue, index) => (
+                  <div key={index} className="zip-code-item">
+                    <span className="line-number">Line {issue.line}:</span>
+                    <span className="original-code">{issue.field}: {issue.value}</span>
+                    <span className="arrow">→</span>
+                    <span className="corrected-code needs-correction">
+                      {issue.issue === 'start_date_not_in_past' ? 'Start date is in the future' :
+                       issue.issue === 'end_date_not_in_future' ? 'End date is in the past' :
+                       issue.issue === 'invalid_date_format' ? 'Invalid date format (cannot parse date)' :
+                       'Unknown date issue'}
+                    </span>
+                    <div className="email-info">
+                      <strong>Email:</strong> {issue.email}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p>These date issues need manual correction. Would you like to cancel and fix them?</p>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn-secondary"
+                onClick={() => handleDateValidationCorrection('cancel')}
+              >
+                Cancel and Correct
+              </button>
+              <button
+                className="btn-primary"
+                onClick={() => handleDateValidationCorrection('proceed')}
+              >
+                Proceed Anyway
               </button>
             </div>
           </div>
