@@ -8,6 +8,8 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [isSandbox, setIsSandbox] = useState(false);
   const [provider, setProvider] = useState('stripe');
   const [useMappingZipcodes, setUseMappingZipcodes] = useState(false);
+  const [hasMissingPostalCodes, setHasMissingPostalCodes] = useState(false);
+  const [missingPostalCodeCount, setMissingPostalCodeCount] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
   const [error, setError] = useState(null);
@@ -33,40 +35,104 @@ const FileUpload = ({ onProcessingComplete }) => {
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
-    if (file) {
-      // Check if file is CSV by extension, MIME type, or content
-      const isCSV = file.name.toLowerCase().endsWith('.csv') || 
-                   file.type === 'text/csv' || 
-                   file.type === 'application/csv' ||
-                   file.type === 'text/plain' ||
-                   file.type === '';
-      
-      if (isCSV) {
-        // Additional check: read first few lines to see if it looks like CSV
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const text = e.target.result;
-          const lines = text.split('\n');
-          
-          // Check if first line contains commas (indicating CSV format)
-          const firstLine = lines[0];
-          if (firstLine.includes(',')) {
-            if (fileType === 'subscriber') {
-              setSubscriberFile(file);
-            } else {
-              setMappingFile(file);
-            }
-          } else {
-            alert('The file does not appear to be in CSV format. Please select a file with comma-separated values.');
-          }
-        };
-        reader.readAsText(file);
-      } else {
-        alert('Please select a valid CSV file. The file should have a .csv extension or be a text file.');
-      }
-    } else {
-      alert('Please select a file.');
+    if (!file) return;
+
+    // Check if it's a CSV file (either .csv extension or text file with comma-separated content)
+    const isCSV = file.name.toLowerCase().endsWith('.csv') ||
+                  (file.type === 'text/plain' && file.name.toLowerCase().endsWith('.txt'));
+
+    if (!isCSV) {
+      alert('Please select a valid CSV file. The file should have a .csv extension or be a text file.');
+      return;
     }
+
+    // Additional validation for CSV content
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target.result;
+      const lines = content.split('\n');
+      const firstLine = lines[0];
+      
+      // Check if the first line contains commas (indicating CSV format)
+      if (!firstLine.includes(',')) {
+        alert('The selected file does not appear to be in CSV format. Please select a valid CSV file.');
+        return;
+      }
+
+      if (fileType === 'subscriber') {
+        setSubscriberFile(file);
+        // Check for missing postal codes when subscriber file is selected
+        checkForMissingPostalCodes(file);
+      } else if (fileType === 'mapping') {
+        setMappingFile(file);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Reset missing postal codes state when subscriber file is cleared
+  const clearSubscriberFile = () => {
+    setSubscriberFile(null);
+    setHasMissingPostalCodes(false);
+    setMissingPostalCodeCount(0);
+  };
+
+  const checkForMissingPostalCodes = (file) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const content = event.target.result;
+        const lines = content.split('\n');
+        const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+        
+        // Find the column indices
+        const countryCodeIndex = headers.findIndex(h => h.toLowerCase() === 'address_country_code');
+        const postalCodeIndex = headers.findIndex(h => h.toLowerCase() === 'address_postal_code');
+        
+        if (countryCodeIndex === -1 || postalCodeIndex === -1) {
+          console.log('Required columns not found in subscriber file');
+          setHasMissingPostalCodes(false);
+          setMissingPostalCodeCount(0);
+          return;
+        }
+        
+        // Supported countries for postal code mapping
+        const supportedCountries = ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US'];
+        
+        let missingCount = 0;
+        
+        // Check each data row
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+          
+          const values = line.split(',').map(v => v.trim().replace(/"/g, ''));
+          const countryCode = values[countryCodeIndex];
+          const postalCode = values[postalCodeIndex];
+          
+          // Check if it's a supported country with missing postal code
+          if (supportedCountries.includes(countryCode) && 
+              (!postalCode || postalCode === '' || postalCode === 'nan' || postalCode === 'None')) {
+            missingCount++;
+          }
+        }
+        
+        setMissingPostalCodeCount(missingCount);
+        setHasMissingPostalCodes(missingCount > 0);
+        
+        if (missingCount > 0) {
+          console.log(`Found ${missingCount} records with missing postal codes for supported countries`);
+        } else {
+          console.log('No missing postal codes found for supported countries');
+        }
+        
+      } catch (error) {
+        console.error('Error checking for missing postal codes:', error);
+        setHasMissingPostalCodes(false);
+        setMissingPostalCodeCount(0);
+      }
+    };
+    reader.readAsText(file);
   };
 
   // New function to validate US zip codes
@@ -488,9 +554,7 @@ const FileUpload = ({ onProcessingComplete }) => {
       
       // Check if validation is required
       if (result.validation_required) {
-        console.log("DEBUG: Validation required, processing results...");
         const validationResults = result.postal_validation_results;
-        console.log("DEBUG: Validation results received:", validationResults);
         
         // Get the current skipped types from the request
         const currentSkippedTypes = skipValidationTypes || [];
@@ -510,47 +574,35 @@ const FileUpload = ({ onProcessingComplete }) => {
         // Show validation modals in order
         let modalShown = false;
         
-        console.log("DEBUG: Checking US missing zero:", validationResults.us_missing_zero?.length);
         if (validationResults.us_missing_zero && validationResults.us_missing_zero.length > 0) {
-          console.log("DEBUG: Showing US missing zero modal");
           setMissingZeroIssues(validationResults.us_missing_zero);
           setShowMissingZeroModal(true);
           modalShown = true;
         }
         
-        console.log("DEBUG: Checking US incorrect format:", validationResults.us_incorrect_format?.length);
         if (!modalShown && validationResults.us_incorrect_format && validationResults.us_incorrect_format.length > 0) {
-          console.log("DEBUG: Showing US incorrect format modal");
           setIncorrectFormatIssues(validationResults.us_incorrect_format);
           setShowIncorrectFormatModal(true);
           modalShown = true;
         }
         
-        console.log("DEBUG: Checking Canadian incorrect format:", validationResults.canadian_incorrect_format?.length);
         if (!modalShown && validationResults.canadian_incorrect_format && validationResults.canadian_incorrect_format.length > 0) {
-          console.log("DEBUG: Showing Canadian incorrect format modal");
           setCanadianPostalIssues(validationResults.canadian_incorrect_format);
           setShowCanadianPostalModal(true);
           modalShown = true;
         }
         
-        console.log("DEBUG: Checking Bluesnap card token format:", validationResults.bluesnap_card_token_format?.length);
         if (!modalShown && validationResults.bluesnap_card_token_format && validationResults.bluesnap_card_token_format.length > 0) {
-          console.log("DEBUG: Showing Bluesnap card token format modal");
           setCardTokenFormatIssues(validationResults.bluesnap_card_token_format);
           setShowCardTokenFormatModal(true);
           modalShown = true;
         }
         
-        console.log("DEBUG: Checking date validation issues:", validationResults.date_validation_issues?.length);
         if (!modalShown && validationResults.date_validation_issues && validationResults.date_validation_issues.length > 0) {
-          console.log("DEBUG: Showing date validation modal");
           setDateValidationIssues(validationResults.date_validation_issues);
           setShowDateValidationModal(true);
           modalShown = true;
         }
-        
-        console.log("DEBUG: Modal shown:", modalShown);
         
         setIsProcessing(false);
         setProcessingStatus('');
@@ -630,24 +682,26 @@ const FileUpload = ({ onProcessingComplete }) => {
             </div>
           </div>
 
-          <div className="form-group">
-            <label>Missing Zip Codes</label>
-            <div className="toggle-container">
-              <span className={!useMappingZipcodes ? 'active' : ''}>Use original data</span>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={useMappingZipcodes}
-                  onChange={(e) => setUseMappingZipcodes(e.target.checked)}
-                />
-                <span className="slider round"></span>
-              </label>
-              <span className={useMappingZipcodes ? 'active' : ''}>Use mapping zipcodes for missing fields</span>
+          {hasMissingPostalCodes && (
+            <div className="form-group missing-postal-codes-section">
+              <label className="missing-postal-codes-label">Necessary postal codes missing ({missingPostalCodeCount} records)</label>
+              <div className="toggle-container">
+                <span className={!useMappingZipcodes ? 'active' : ''}>Use original data</span>
+                <label className="switch">
+                  <input
+                    type="checkbox"
+                    checked={useMappingZipcodes}
+                    onChange={(e) => setUseMappingZipcodes(e.target.checked)}
+                  />
+                  <span className="slider round"></span>
+                </label>
+                <span className={useMappingZipcodes ? 'active' : ''}>Use mapping zipcodes if available</span>
+              </div>
+              <div className="toggle-description">
+                Fill missing postal codes from mapping file for: AU, CA, FR, DE, IN, IT, NL, ES, GB, US (only if mapping data is available)
+              </div>
             </div>
-            <div className="toggle-description">
-              Fill missing postal codes from mapping file for: AU, CA, FR, DE, IN, IT, NL, ES, GB, US
-            </div>
-          </div>
+          )}
         </div>
 
         <div className="form-group">

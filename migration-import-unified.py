@@ -139,46 +139,35 @@ def validate_postal_codes_after_merge(completed_df, provider='stripe'):
                     })
     
     # Date validation for both providers
-    print("Starting date validation...")
     from datetime import timezone
     current_datetime = datetime.now(timezone.utc)  # Make it timezone-aware with UTC
-    print(f"Current datetime: {current_datetime}")
-    print(f"Current datetime type: {type(current_datetime)}")
     
     for idx, row in completed_df.iterrows():
         period_started = row.get('current_period_started_at')
         period_ends = row.get('current_period_ends_at')
         email = row.get('customer_email', 'No email')
         
-        # Debug output for first few rows
-        if idx < 3:
-            print(f"Row {idx + 1}: period_started type: {type(period_started)}, value: {period_started}")
-            print(f"Row {idx + 1}: period_ends type: {type(period_ends)}, value: {period_ends}")
-            print(f"Row {idx + 1}: period_started isna: {pd.isna(period_started)}")
-            print(f"Row {idx + 1}: period_ends isna: {pd.isna(period_ends)}")
-        
         # Validate current_period_started_at
         if period_started and not pd.isna(period_started):
-            print(f"Processing period_started for row {idx + 1}: {period_started} (type: {type(period_started)})")
             try:
                 # Handle different date formats
                 if isinstance(period_started, str):
-                    print(f"Converting string to datetime: {period_started}")
                     period_started_dt = pd.to_datetime(period_started)
                 elif hasattr(period_started, 'to_pydatetime'):
                     # Already a pandas datetime object
-                    print(f"Converting pandas datetime to pydatetime: {period_started}")
                     period_started_dt = period_started.to_pydatetime()
+                    # Ensure timezone awareness
+                    if period_started_dt.tzinfo is None:
+                        period_started_dt = period_started_dt.replace(tzinfo=timezone.utc)
                 else:
                     # Try to convert to datetime
-                    print(f"Converting other type to datetime: {period_started}")
                     period_started_dt = pd.to_datetime(period_started)
                 
-                print(f"Converted period_started_dt: {period_started_dt} (type: {type(period_started_dt)})")
-                print(f"Comparison: {period_started_dt} >= {current_datetime} = {period_started_dt >= current_datetime}")
+                # Ensure timezone awareness for comparison
+                if hasattr(period_started_dt, 'tzinfo') and period_started_dt.tzinfo is None:
+                    period_started_dt = period_started_dt.replace(tzinfo=timezone.utc)
                 
                 if period_started_dt >= current_datetime:
-                    print(f"Adding start_date_not_in_past issue for row {idx + 1}")
                     validation_results['date_validation_issues'].append({
                         'line': idx + 1,
                         'field': 'current_period_started_at',
@@ -187,8 +176,6 @@ def validate_postal_codes_after_merge(completed_df, provider='stripe'):
                         'issue': 'start_date_not_in_past'
                     })
             except Exception as e:
-                print(f"Date parsing error for line {idx + 1}, period_started: {period_started}, error: {e}")
-                print(f"Error type: {type(e)}")
                 validation_results['date_validation_issues'].append({
                     'line': idx + 1,
                     'field': 'current_period_started_at',
@@ -199,26 +186,25 @@ def validate_postal_codes_after_merge(completed_df, provider='stripe'):
         
         # Validate current_period_ends_at
         if period_ends and not pd.isna(period_ends):
-            print(f"Processing period_ends for row {idx + 1}: {period_ends} (type: {type(period_ends)})")
             try:
                 # Handle different date formats
                 if isinstance(period_ends, str):
-                    print(f"Converting string to datetime: {period_ends}")
                     period_ends_dt = pd.to_datetime(period_ends)
                 elif hasattr(period_ends, 'to_pydatetime'):
                     # Already a pandas datetime object
-                    print(f"Converting pandas datetime to pydatetime: {period_ends}")
                     period_ends_dt = period_ends.to_pydatetime()
+                    # Ensure timezone awareness
+                    if period_ends_dt.tzinfo is None:
+                        period_ends_dt = period_ends_dt.replace(tzinfo=timezone.utc)
                 else:
                     # Try to convert to datetime
-                    print(f"Converting other type to datetime: {period_ends}")
                     period_ends_dt = pd.to_datetime(period_ends)
                 
-                print(f"Converted period_ends_dt: {period_ends_dt} (type: {type(period_ends_dt)})")
-                print(f"Comparison: {period_ends_dt} <= {current_datetime} = {period_ends_dt <= current_datetime}")
+                # Ensure timezone awareness for comparison
+                if hasattr(period_ends_dt, 'tzinfo') and period_ends_dt.tzinfo is None:
+                    period_ends_dt = period_ends_dt.replace(tzinfo=timezone.utc)
                 
                 if period_ends_dt <= current_datetime:
-                    print(f"Adding end_date_not_in_future issue for row {idx + 1}")
                     validation_results['date_validation_issues'].append({
                         'line': idx + 1,
                         'field': 'current_period_ends_at',
@@ -227,8 +213,6 @@ def validate_postal_codes_after_merge(completed_df, provider='stripe'):
                         'issue': 'end_date_not_in_future'
                     })
             except Exception as e:
-                print(f"Date parsing error for line {idx + 1}, period_ends: {period_ends}, error: {e}")
-                print(f"Error type: {type(e)}")
                 validation_results['date_validation_issues'].append({
                     'line': idx + 1,
                     'field': 'current_period_ends_at',
@@ -237,11 +221,6 @@ def validate_postal_codes_after_merge(completed_df, provider='stripe'):
                     'issue': 'invalid_date_format'
                 })
     
-    print(f"Date validation complete. Found {len(validation_results['date_validation_issues'])} issues.")
-    print(f"Issues breakdown:")
-    for issue_type in ['start_date_not_in_past', 'end_date_not_in_future', 'invalid_date_format']:
-        count = sum(1 for issue in validation_results['date_validation_issues'] if issue['issue'] == issue_type)
-        print(f"  {issue_type}: {count}")
     return validation_results
 
 def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', use_mapping_zipcodes=False, skip_validation_types=None):
