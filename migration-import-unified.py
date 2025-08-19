@@ -4,6 +4,7 @@ import random
 import string
 import os
 import time
+import zipfile
 
 def generate_random_email():
     """Generate a random email for sandbox data anonymization"""
@@ -787,6 +788,24 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     no_tokens = completed[completed['card_token'].isnull()]
     print(f"No tokens records: {len(no_tokens)}")
     
+    # Find all rows where card_token appears more than once
+    duplicate_tokens = completed[completed['card_token'].notna() & completed.duplicated(subset='card_token', keep=False)]
+    print(f"Duplicate tokens records: {len(duplicate_tokens)}")
+    
+    # Find all rows where card_id appears more than once (only for Stripe)
+    duplicate_card_ids = pd.DataFrame()
+    if provider.lower() == 'stripe' and 'card_id' in completed.columns:
+        duplicate_card_ids = completed[completed['card_id'].notna() & completed.duplicated(subset='card_id', keep=False)]
+        print(f"Duplicate card IDs records: {len(duplicate_card_ids)}")
+    
+    # Find all rows where subscription_external_id appears more than once
+    duplicate_external_subscription_ids = completed[completed.duplicated(subset='subscription_external_id', keep=False)]
+    print(f"Duplicate external subscription IDs records: {len(duplicate_external_subscription_ids)}")
+    
+    # Find all rows where customer_email appears more than once
+    duplicate_emails = completed[completed.duplicated(subset='customer_email', keep=False)]
+    print(f"Duplicate emails records: {len(duplicate_emails)}")
+    
     # Generate output filenames
     if seller_name:
         # Use seller name as prefix, clean it for filename
@@ -809,8 +828,15 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     # Save files and collect information
     files_to_save = [
         (success, f'{base_filename}_final_import.csv'),
-        (no_tokens, f'{base_filename}_no_token_found.csv')
+        (no_tokens, f'{base_filename}_no_token_found.csv'),
+        (duplicate_tokens, f'{base_filename}_duplicate_tokens.csv'),
+        (duplicate_external_subscription_ids, f'{base_filename}_duplicate_external_subscription_ids.csv'),
+        (duplicate_emails, f'{base_filename}_duplicate_emails.csv')
     ]
+    
+    # Add duplicate card IDs file only for Stripe
+    if provider.lower() == 'stripe' and not duplicate_card_ids.empty:
+        files_to_save.append((duplicate_card_ids, f'{base_filename}_duplicate_card_ids.csv'))
     
     for df, filename in files_to_save:
         if not df.empty:
@@ -830,18 +856,52 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         else:
             print(f"Skipping empty dataframe for: {filename}")
     
+    # Create zip file with all reports
+    if output_files:  # Only create zip if there are files to include
+        zip_filename = f'{base_filename}_all_reports.zip'
+        zip_path = os.path.join(output_dir, zip_filename)
+        
+        try:
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for file_info in output_files:
+                    file_path = os.path.join(output_dir, file_info['name'])
+                    if os.path.exists(file_path):
+                        zipf.write(file_path, file_info['name'])
+                        print(f"Added {file_info['name']} to zip file")
+            
+            zip_size = os.path.getsize(zip_path)
+            print(f"Zip file created successfully: {zip_path} (Size: {zip_size} bytes)")
+            
+            # Add zip file to output files list
+            output_files.append({
+                'name': zip_filename,
+                'size': zip_size,
+                'url': f'file://{os.path.abspath(zip_path)}',
+                'is_zip': True
+            })
+        except Exception as e:
+            print(f"Error creating zip file: {e}")
+            # Continue without zip file if creation fails
+    
     processing_time = time.time() - start_time
     
     # Prepare results
     results = {
         'success_count': len(success),
         'no_tokens_count': len(no_tokens),
+        'duplicate_tokens_count': len(duplicate_tokens),
+        'duplicate_external_subscription_ids_count': len(duplicate_external_subscription_ids),
+        'duplicate_emails_count': len(duplicate_emails),
         'total_processed': len(completed),
         'processing_time': f"{processing_time:.2f} seconds",
         'output_files': output_files,
         'environment': 'Sandbox' if is_sandbox else 'Production',
         'validation_results': validation_results
     }
+    
+    # Add duplicate card IDs count only for Stripe
+    if provider.lower() == 'stripe':
+        results['duplicate_card_ids_count'] = len(duplicate_card_ids)
     
     print('Success')
     return results
