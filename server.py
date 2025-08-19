@@ -57,16 +57,6 @@ def process_migration_api():
         vault_provider = request.form.get('vault_provider', '')
         is_sandbox = request.form.get('is_sandbox', 'false').lower() == 'true'
         provider = request.form.get('provider', 'stripe')
-        use_mapping_zipcodes = request.form.get('use_mapping_zipcodes', 'false').lower() == 'true'
-        skip_validation_types = request.form.get('skip_validation_types', '')
-        
-        # Parse skip_validation_types from JSON string
-        skip_types = []
-        if skip_validation_types:
-            try:
-                skip_types = json.loads(skip_validation_types)
-            except:
-                skip_types = []
         
         # Validate files
         if subscriber_file.filename == '':
@@ -104,14 +94,10 @@ def process_migration_api():
             vault_provider, 
             is_sandbox, 
             provider, 
-            seller_name, 
-            use_mapping_zipcodes,
-            skip_types
+            seller_name
         )
         
-        # Check if validation is required
-        if result.get('validation_required'):
-            return jsonify(result)
+
         
         # Update file URLs to be downloadable
         for file_info in result['output_files']:
