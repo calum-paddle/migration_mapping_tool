@@ -126,6 +126,62 @@ code {
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 }
 
+/* Custom file input wrapper that contains everything inside one visual box */
+.file-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  position: relative;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background-color: #fff;
+  padding: 0.75rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Hide the native file input but keep it functional */
+.hidden-file-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 10;
+  pointer-events: auto;
+}
+
+/* Custom "Choose file" button */
+.custom-file-button {
+  background-color: #e2e8f0;
+  color: #4a5568;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+  border: none;
+  cursor: pointer;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* Custom file name display */
+.custom-file-name {
+  flex: 1;
+  color: #4a5568;
+  font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  z-index: 2;
+  pointer-events: none;
+}
+
 .toggle-container {
   display: flex;
   align-items: center;
@@ -513,4 +569,28 @@ input:checked + .slider:before {
   font-size: 0.875rem;
   color: #666;
   font-style: italic;
+}
+
+.record-count-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 6px;
+  color: #166534;
+  font-size: 0.875rem;
+  font-weight: 500;
+  white-space: nowrap;
+  margin-left: auto;
+  pointer-events: none;
+}
+
+.record-icon {
+  font-size: 1rem;
+}
+
+.record-count {
+  font-weight: 600;
 } 

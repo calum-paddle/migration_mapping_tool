@@ -10,6 +10,8 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStatus, setProcessingStatus] = useState('');
   const [error, setError] = useState(null);
+  const [subscriberRecordCount, setSubscriberRecordCount] = useState(0);
+  const [mappingRecordCount, setMappingRecordCount] = useState(0);
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -24,11 +26,22 @@ const FileUpload = ({ onProcessingComplete }) => {
       return;
     }
 
-    if (fileType === 'subscriber') {
-      setSubscriberFile(file);
-    } else if (fileType === 'mapping') {
-      setMappingFile(file);
-    }
+    // Count records in the file
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target.result;
+      const lines = content.split('\n').filter(line => line.trim() !== '');
+      const recordCount = Math.max(0, lines.length - 1); // Subtract 1 for header row
+      
+      if (fileType === 'subscriber') {
+        setSubscriberFile(file);
+        setSubscriberRecordCount(recordCount);
+      } else if (fileType === 'mapping') {
+        setMappingFile(file);
+        setMappingRecordCount(recordCount);
+      }
+    };
+    reader.readAsText(file);
   };
 
   const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov) => {
@@ -186,26 +199,50 @@ const FileUpload = ({ onProcessingComplete }) => {
 
         <div className="form-group">
           <label htmlFor="subscriberFile">Subscriber Export File:</label>
-          <input
-            type="file"
-            id="subscriberFile"
-            accept=".csv,.txt"
-            onChange={(e) => handleFileChange(e, 'subscriber')}
-            required
-          />
-          {subscriberFile && <p className="file-info">Selected: {subscriberFile.name}</p>}
+          <div className="file-input-wrapper">
+            <input
+              type="file"
+              id="subscriberFile"
+              accept=".csv,.txt"
+              onChange={(e) => handleFileChange(e, 'subscriber')}
+              required
+              className="hidden-file-input"
+            />
+            <span className="custom-file-button">Choose file</span>
+            <span className="custom-file-name">
+              {subscriberFile ? subscriberFile.name : 'No file chosen'}
+            </span>
+            {subscriberFile && (
+              <div className="record-count-box">
+                <span className="record-icon">📊</span>
+                <span className="record-count">{subscriberRecordCount} records</span>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="form-group">
           <label htmlFor="mappingFile">Mapping File:</label>
-          <input
-            type="file"
-            id="mappingFile"
-            accept=".csv,.txt"
-            onChange={(e) => handleFileChange(e, 'mapping')}
-            required
-          />
-          {mappingFile && <p className="file-info">Selected: {mappingFile.name}</p>}
+          <div className="file-input-wrapper">
+            <input
+              type="file"
+              id="mappingFile"
+              accept=".csv,.txt"
+              onChange={(e) => handleFileChange(e, 'mapping')}
+              required
+              className="hidden-file-input"
+            />
+            <span className="custom-file-button">Choose file</span>
+            <span className="custom-file-name">
+              {mappingFile ? mappingFile.name : 'No file chosen'}
+            </span>
+            {mappingFile && (
+              <div className="record-count-box">
+                <span className="record-icon">📊</span>
+                <span className="record-count">{mappingRecordCount} records</span>
+              </div>
+            )}
+          </div>
         </div>
 
         <button type="submit" disabled={isProcessing} className="submit-btn">
