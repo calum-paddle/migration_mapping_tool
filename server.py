@@ -98,7 +98,7 @@ def process_migration_api():
         )
         
         # Check if validation failed
-        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation']:
+        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation', 'date_validation']:
             # Clean up uploaded files
             os.remove(subscriber_path)
             os.remove(mapping_path)
@@ -169,6 +169,41 @@ def list_output_files():
                     })
         
         return jsonify({'files': files})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/continue-processing', methods=['POST'])
+def continue_processing():
+    """Continue processing after user input"""
+    try:
+        data = request.get_json()
+        user_choice = data.get('user_choice')
+        step = data.get('step')
+        
+        print(f"User chose: {user_choice} for step: {step}")
+        
+        # Handle different user choices
+        if user_choice == 'stop_processing':
+            return jsonify({
+                'status': 'stopped_by_user',
+                'message': 'Processing stopped by user request'
+            })
+        elif user_choice == 'skip_duplicates':
+            # Continue processing, skipping duplicates
+            # This would call the migration function again with skip_duplicates=True
+            return jsonify({
+                'status': 'continuing',
+                'message': 'Continuing with duplicates skipped'
+            })
+        elif user_choice == 'continue_with_duplicates':
+            # Continue processing with duplicates
+            return jsonify({
+                'status': 'continuing',
+                'message': 'Continuing with duplicates included'
+            })
+        else:
+            return jsonify({'error': 'Invalid user choice'}), 400
+            
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

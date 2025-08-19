@@ -94,12 +94,14 @@ def validate_subscriber_columns(columns):
         'required_columns_count': len(required_columns)
     }
 
-def validate_bluesnap_card_tokens(subscriber_data):
+def validate_bluesnap_card_tokens(subscriber_data, seller_name='', is_sandbox=False):
     """
     Validate that Bluesnap card tokens are exactly 13 numerical characters
     
     Args:
         subscriber_data: DataFrame containing subscriber data
+        seller_name: Name of the seller for file naming
+        is_sandbox: Boolean indicating if this is sandbox mode
     
     Returns:
         dict: Validation results with status and incorrect records
@@ -138,6 +140,120 @@ def validate_bluesnap_card_tokens(subscriber_data):
             'incorrect_count': 0,
             'total_records': 0,
             'download_file': None
+        }
+
+def validate_date_periods(subscriber_data, seller_name='', is_sandbox=False):
+    """
+    Validate that current_period_started_at and current_period_ends_at dates are logical
+    - current_period_started_at should not be after current date/time
+    - current_period_ends_at should not be before current date/time
+    
+    Args:
+        subscriber_data: DataFrame containing subscriber data
+        seller_name: Name of the seller for file naming
+        is_sandbox: Boolean indicating if this is sandbox mode
+    """
+    from datetime import datetime
+    import pandas as pd
+    
+    try:
+        # Check if required columns exist
+        required_columns = ['current_period_started_at', 'current_period_ends_at']
+        missing_columns = [col for col in required_columns if col not in subscriber_data.columns]
+        
+        if missing_columns:
+            return {
+                'valid': False,
+                'error': f'Missing required columns: {missing_columns}',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'incorrect_records': None
+            }
+        
+        # Get current date/time (timezone-naive)
+        current_datetime = datetime.now()
+        
+        # Create a copy of the data for validation (don't modify original)
+        validation_data = subscriber_data.copy()
+        
+        # Parse dates ONLY for this validation (force timezone-naive)
+        try:
+            # Parse dates and convert to timezone-naive
+            started_parsed = pd.to_datetime(
+                validation_data['current_period_started_at'], 
+                errors='coerce'
+            )
+            ended_parsed = pd.to_datetime(
+                validation_data['current_period_ends_at'], 
+                errors='coerce'
+            )
+            
+            # Convert to timezone-naive if they have timezone info
+            if started_parsed.dt.tz is not None:
+                started_parsed = started_parsed.dt.tz_convert(None)
+            if ended_parsed.dt.tz is not None:
+                ended_parsed = ended_parsed.dt.tz_convert(None)
+                
+            validation_data['current_period_started_at_parsed'] = started_parsed
+            validation_data['current_period_ends_at_parsed'] = ended_parsed
+            
+        except Exception as e:
+            return {
+                'valid': False,
+                'error': f'Error parsing dates: {str(e)}',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'incorrect_records': None
+            }
+        
+        # Filter out records with valid dates
+        valid_data = validation_data[
+            validation_data['current_period_started_at_parsed'].notna() & 
+            validation_data['current_period_ends_at_parsed'].notna()
+        ]
+        
+        if len(valid_data) == 0:
+            return {
+                'valid': False,
+                'error': 'No valid date records found',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'incorrect_records': None
+            }
+        
+        # Check for invalid date periods
+        invalid_started = valid_data['current_period_started_at_parsed'] > current_datetime
+        invalid_ended = valid_data['current_period_ends_at_parsed'] < current_datetime
+        
+        # Get records with invalid date periods
+        incorrect_records = valid_data[invalid_started | invalid_ended].copy()
+        
+        # Remove the parsed columns before returning (keep original format)
+        if 'current_period_started_at_parsed' in incorrect_records.columns:
+            incorrect_records = incorrect_records.drop('current_period_started_at_parsed', axis=1)
+        if 'current_period_ends_at_parsed' in incorrect_records.columns:
+            incorrect_records = incorrect_records.drop('current_period_ends_at_parsed', axis=1)
+        
+        # Ensure all datetime columns are converted to strings for JSON serialization
+        for col in incorrect_records.columns:
+            if incorrect_records[col].dtype == 'datetime64[ns]' or incorrect_records[col].dtype == 'datetime64[ns, UTC]':
+                incorrect_records[col] = incorrect_records[col].astype(str)
+        
+        return {
+            'valid': len(incorrect_records) == 0,
+            'incorrect_count': len(incorrect_records),
+            'incorrect_records': incorrect_records,
+            'total_records': len(valid_data)
+        }
+        
+    except Exception as e:
+        print(f"Error in date period validation: {e}")
+        return {
+            'valid': False,
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'incorrect_records': None
         }
 
 def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name=''):
@@ -232,7 +348,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     if provider.lower() == 'bluesnap':
         print("Validating Bluesnap card tokens...")
         try:
-            card_token_validation = validate_bluesnap_card_tokens(subscribedata)
+            card_token_validation = validate_bluesnap_card_tokens(subscribedata, seller_name, is_sandbox)
         except Exception as e:
             print(f"Error during card token validation: {e}")
             return {
@@ -258,7 +374,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     output_dir = 'outputs'
                     os.makedirs(output_dir, exist_ok=True)
                     
-                    incorrect_filename = f"incorrect_card_tokens_{int(time.time())}.csv"
+                    # Create filename with seller name and environment
+                    clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = "_sandbox" if is_sandbox else "_production"
+                    incorrect_filename = f"{clean_seller_name}_incorrect_card_tokens{env_suffix}_{int(time.time())}.csv"
                     incorrect_path = os.path.join(output_dir, incorrect_filename)
                     card_token_validation['incorrect_records'].to_csv(incorrect_path, index=False)
                     card_token_validation['download_file'] = incorrect_filename
@@ -292,6 +412,90 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             'step': 'card_token_validation',
             'total_records': card_token_validation['total_records']
         })
+    
+    # Date period validation (for all providers)
+    print("Validating date periods...")
+    try:
+        date_validation = validate_date_periods(subscribedata, seller_name, is_sandbox)
+    except Exception as e:
+        print(f"Error during date validation: {e}")
+        return {
+            'error': 'Date validation error',
+            'validation_result': {
+                'valid': False,
+                'error': f'Validation error: {str(e)}',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'download_file': None
+            },
+            'step': 'date_validation',
+            'validation_results': validation_results
+        }
+    
+    if not date_validation['valid']:
+        print(f"Date validation failed. Found {date_validation['incorrect_count']} records with invalid date periods.")
+        
+        # Save incorrect records to a file for download
+        if date_validation['incorrect_records'] is not None:
+            try:
+                output_dir = 'outputs'
+                os.makedirs(output_dir, exist_ok=True)
+                
+                # Create filename with seller name and environment
+                clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                clean_seller_name = clean_seller_name.replace(' ', '_')
+                env_suffix = "_sandbox" if is_sandbox else "_production"
+                incorrect_filename = f"{clean_seller_name}_invalid_date_periods{env_suffix}_{int(time.time())}.csv"
+                incorrect_path = os.path.join(output_dir, incorrect_filename)
+                date_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                date_validation['download_file'] = incorrect_filename
+                print(f"Saved incorrect records to: {incorrect_path}")
+                print(f"File exists after save: {os.path.exists(incorrect_path)}")
+            except Exception as e:
+                print(f"Error saving incorrect records file: {e}")
+                date_validation['download_file'] = None
+        
+        # Convert DataFrame to list of dictionaries for JSON serialization
+        validation_result_for_json = {
+            'valid': date_validation['valid'],
+            'incorrect_count': date_validation['incorrect_count'],
+            'total_records': date_validation['total_records'],
+            'download_file': date_validation.get('download_file')
+        }
+        
+        print(f"Returning date validation failure with {len(validation_results)} previous validations")
+        
+        # Ensure validation_results is JSON serializable
+        clean_validation_results = []
+        for validation in validation_results:
+            clean_validation = {
+                'valid': validation['valid'],
+                'step': validation['step']
+            }
+            # Add other fields if they exist and are JSON serializable
+            if 'total_columns' in validation:
+                clean_validation['total_columns'] = validation['total_columns']
+            if 'optional_columns' in validation:
+                clean_validation['optional_columns'] = validation['optional_columns']
+            if 'total_records' in validation:
+                clean_validation['total_records'] = validation['total_records']
+            clean_validation_results.append(clean_validation)
+        
+        return {
+            'error': 'Date validation failed',
+            'validation_result': validation_result_for_json,
+            'step': 'date_validation',
+            'validation_results': clean_validation_results
+        }
+    
+    print(f"Date validation passed. All {date_validation['total_records']} date periods are valid.")
+    
+    # Add successful date validation to results
+    validation_results.append({
+        'valid': True,
+        'step': 'date_validation',
+        'total_records': date_validation['total_records']
+    })
     
     # Provider-specific data processing
     if provider.lower() == 'bluesnap':

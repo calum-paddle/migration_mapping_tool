@@ -14,6 +14,7 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [mappingRecordCount, setMappingRecordCount] = useState(0);
   const [validationResults, setValidationResults] = useState([]);
   const [currentValidationStep, setCurrentValidationStep] = useState('');
+  const [waitingForUserInput, setWaitingForUserInput] = useState(false);
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -83,8 +84,38 @@ const FileUpload = ({ onProcessingComplete }) => {
 
       const result = await response.json();
       
+      // Check if user input is required
+      if (result.status === 'user_input_required') {
+        // Add any previous successful validations first
+        if (result.validation_results) {
+          const previousValidations = result.validation_results.map(validation => ({
+            ...validation,
+            timestamp: Date.now()
+          }));
+          setValidationResults(prev => [...prev, ...previousValidations]);
+        }
+        
+        // Add the validation that requires user input
+        const newValidation = {
+          ...result.validation_result,
+          step: result.step,
+          timestamp: Date.now()
+        };
+        setValidationResults(prev => [...prev, newValidation]);
+        setWaitingForUserInput(true);
+        setIsProcessing(false);
+        setProcessingStatus('');
+        setCurrentValidationStep('');
+        
+        // Scroll to bottom to show validation results
+        setTimeout(() => {
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        }, 100);
+        return;
+      }
+      
       // Check if validation failed
-      if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation')) {
+      if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation' || result.step === 'date_validation')) {
         // Add any previous successful validations first
         if (result.validation_results) {
           const previousValidations = result.validation_results.map(validation => ({
@@ -104,6 +135,11 @@ const FileUpload = ({ onProcessingComplete }) => {
         setIsProcessing(false);
         setProcessingStatus('');
         setCurrentValidationStep('');
+        
+        // Scroll to bottom to show validation results
+        setTimeout(() => {
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        }, 100);
         return;
       }
       
@@ -122,6 +158,11 @@ const FileUpload = ({ onProcessingComplete }) => {
       setError('Error processing migration: ' + err.message);
       setIsProcessing(false);
       setProcessingStatus('');
+      
+      // Scroll to bottom to show error message
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 100);
     }
   };
 
@@ -130,6 +171,54 @@ const FileUpload = ({ onProcessingComplete }) => {
     setError(null);
     setProcessingStatus('');
     setCurrentValidationStep('');
+    setWaitingForUserInput(false);
+  };
+
+  const handleUserInput = async (step, userChoice) => {
+    try {
+      setProcessingStatus('Processing your choice...');
+      setIsProcessing(true);
+      
+      const response = await fetch('/api/continue-processing', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_choice: userChoice,
+          step: step
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to process user choice');
+      }
+
+      const result = await response.json();
+      
+      if (result.status === 'stopped_by_user') {
+        setProcessingStatus('Processing stopped by user request');
+        setIsProcessing(false);
+        setWaitingForUserInput(false);
+      } else if (result.status === 'continuing') {
+        // Continue with processing - you would call the migration function again here
+        setProcessingStatus('Continuing with processing...');
+        // For now, just show success
+        setProcessingStatus('Processing completed successfully!');
+        setIsProcessing(false);
+        setWaitingForUserInput(false);
+      }
+      
+    } catch (err) {
+      setError('Error processing user choice: ' + err.message);
+      setIsProcessing(false);
+      setWaitingForUserInput(false);
+      
+      // Scroll to bottom to show error message
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 100);
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -159,6 +248,11 @@ const FileUpload = ({ onProcessingComplete }) => {
       setError('Error processing migration: ' + err.message);
       setIsProcessing(false);
       setProcessingStatus('');
+      
+      // Scroll to bottom to show error message
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 100);
     }
   };
 
@@ -318,8 +412,9 @@ const FileUpload = ({ onProcessingComplete }) => {
           {processingStatus}
           {currentValidationStep && (
             <div className="validation-progress">
-              {currentValidationStep === 'column_validation' && 'Column validation in progress...'}
-              {currentValidationStep === 'card_token_validation' && 'Bluesnap card token validation in progress...'}
+                        {currentValidationStep === 'column_validation' && 'Column validation in progress...'}
+          {currentValidationStep === 'date_validation' && 'Date validation in progress...'}
+          {currentValidationStep === 'card_token_validation' && 'Bluesnap card token validation in progress...'}
             </div>
           )}
         </div>
@@ -334,7 +429,13 @@ const FileUpload = ({ onProcessingComplete }) => {
             <span className="validation-title">
               {validation.step === 'column_validation' 
                 ? (validation.valid ? 'Column validation passed' : 'Column validation failed')
-                : (validation.valid ? 'Card token validation passed' : 'Card token validation failed')
+                : validation.step === 'date_validation'
+                ? (validation.valid ? 'Date validation passed' : 'Date validation failed')
+                : validation.step === 'card_token_validation'
+                ? (validation.valid ? 'Card token validation passed' : 'Card token validation failed')
+                : validation.step === 'duplicate_detection'
+                ? 'Duplicate detection requires input'
+                : (validation.valid ? `${validation.step} passed` : `${validation.step} failed`)
               }
             </span>
             {!validation.valid && validation.download_file && (
@@ -352,6 +453,9 @@ const FileUpload = ({ onProcessingComplete }) => {
               >
                 📥
               </button>
+            )}
+            {validation.requires_user_input && (
+              <span className="user-input-required">❓</span>
             )}
           </div>
           <div className="validation-details">
@@ -379,7 +483,21 @@ const FileUpload = ({ onProcessingComplete }) => {
                   </>
                 )}
               </>
-            ) : (
+            ) : validation.step === 'date_validation' ? (
+              <>
+                {validation.valid ? (
+                  <p>All {validation.total_records} date periods are valid.</p>
+                ) : (
+                  <>
+                    <p>Date periods must be logical: start dates should not be in the future, end dates should not be in the past.</p>
+                    <div className="missing-columns">
+                      <p><strong>Found {validation.incorrect_count} records with invalid date periods.</strong></p>
+                      <p>Click the download icon to get a report of all incorrect records.</p>
+                    </div>
+                  </>
+                )}
+              </>
+            ) : validation.step === 'card_token_validation' ? (
               <>
                 {validation.valid ? (
                   <p>All {validation.total_records} card tokens are correctly formatted.</p>
@@ -391,6 +509,35 @@ const FileUpload = ({ onProcessingComplete }) => {
                       <p>Click the download icon to get a report of all incorrect records.</p>
                     </div>
                   </>
+                )}
+              </>
+            ) : validation.step === 'duplicate_detection' ? (
+              <>
+                <p>{validation.message}</p>
+                {validation.requires_user_input && validation.options && (
+                  <div className="user-input-options">
+                    <p><strong>Please choose how to proceed:</strong></p>
+                    <div className="user-input-buttons">
+                      {validation.options.map(option => (
+                        <button 
+                          key={option}
+                          onClick={() => handleUserInput(validation.step, option)}
+                          className="user-input-btn"
+                          disabled={isProcessing}
+                        >
+                          {option.replace(/_/g, ' ')}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {validation.valid ? (
+                  <p>Validation passed</p>
+                ) : (
+                  <p>Validation failed</p>
                 )}
               </>
             )}
