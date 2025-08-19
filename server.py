@@ -97,7 +97,12 @@ def process_migration_api():
             seller_name
         )
         
-
+        # Check if validation failed
+        if 'error' in result and result.get('step') == 'column_validation':
+            # Clean up uploaded files
+            os.remove(subscriber_path)
+            os.remove(mapping_path)
+            return jsonify(result)
         
         # Update file URLs to be downloadable
         for file_info in result['output_files']:

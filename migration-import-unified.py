@@ -10,6 +10,90 @@ def generate_random_email():
     random_string = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
     return f"blackhole+{random_string}@paddle.com"
 
+def validate_subscriber_columns(columns):
+    """
+    Validate that the subscriber file has all required columns
+    
+    Args:
+        columns: List of column names from the subscriber file
+    
+    Returns:
+        dict: Validation results with status and missing columns
+    """
+    # Required columns (exact names)
+    required_columns = [
+        'customer_email',
+        'customer_full_name', 
+        'customer_external_id',
+        'business_tax_identifier',
+        'business_name',
+        'business_company_number',
+        'business_external_id',
+        'address_country_code',
+        'address_street_line1',
+        'address_street_line2',
+        'address_city',
+        'address_region',
+        'address_postal_code',
+        'address_external_id',
+        'status',
+        'currency_code',
+        'started_at',
+        'paused_at',
+        'collection_mode',
+        'enable_checkout',
+        'purchase_order_number',
+        'additional_information',
+        'payment_terms_frequency',
+        'payment_terms_interval',
+        'current_period_started_at',
+        'current_period_ends_at',
+        'trial_period_frequency',
+        'trial_period_interval',
+        'subscription_external_id',
+        'card_token',
+        'discount_id',
+        'discount_remaining_cycles',
+        'subscription_custom_data_key_1',
+        'subscription_custom_data_value_1',
+        'subscription_custom_data_key_2',
+        'subscription_custom_data_value_2',
+        'price_id_1',
+        'quantity_1',
+        'price_id_2',
+        'quantity_2'
+    ]
+    
+    # Convert columns to list if it's a pandas Index
+    if hasattr(columns, 'tolist'):
+        columns = columns.tolist()
+    
+    # Check for missing required columns
+    missing_columns = [col for col in required_columns if col not in columns]
+    
+    # Check for optional custom data pairs and line items (should not cause validation to fail)
+    optional_patterns = [
+        r'subscription_custom_data_key_\d+',
+        r'subscription_custom_data_value_\d+',
+        r'price_id_\d+',
+        r'quantity_\d+'
+    ]
+    
+    import re
+    optional_columns = []
+    for pattern in optional_patterns:
+        for col in columns:
+            if re.match(pattern, col) and col not in required_columns:
+                optional_columns.append(col)
+    
+    return {
+        'valid': len(missing_columns) == 0,
+        'missing_columns': missing_columns,
+        'optional_columns': optional_columns,
+        'total_columns': len(columns),
+        'required_columns_count': len(required_columns)
+    }
+
 def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name=''):
     """
     Process migration from payment providers to Paddle Billing
@@ -77,13 +161,19 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     print(subscribedata)
     
-    # Check for required columns in subscriber file
-    required_subscriber_columns = ['card_token', 'customer_email', 'customer_full_name']
-    missing_subscriber_columns = [col for col in required_subscriber_columns if col not in subscribedata.columns]
+    # Validate subscriber file columns
+    print("Validating subscriber file columns...")
+    validation_result = validate_subscriber_columns(subscribedata.columns)
     
-    if missing_subscriber_columns:
-        print(f"Warning: Missing required subscriber columns: {missing_subscriber_columns}")
-        print("Available columns:", subscribedata.columns.tolist())
+    if not validation_result['valid']:
+        print(f"Validation failed. Missing columns: {validation_result['missing_columns']}")
+        return {
+            'error': 'Column validation failed',
+            'validation_result': validation_result,
+            'step': 'column_validation'
+        }
+    
+    print(f"Column validation passed. Found {validation_result['total_columns']} columns including {len(validation_result['optional_columns'])} optional columns.")
     
     # Provider-specific data processing
     if provider.lower() == 'bluesnap':

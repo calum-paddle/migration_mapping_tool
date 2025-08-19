@@ -12,6 +12,7 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [error, setError] = useState(null);
   const [subscriberRecordCount, setSubscriberRecordCount] = useState(0);
   const [mappingRecordCount, setMappingRecordCount] = useState(0);
+  const [validationResult, setValidationResult] = useState(null);
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -79,6 +80,14 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
 
       const result = await response.json();
+      
+      // Check if validation failed
+      if (result.error && result.step === 'column_validation') {
+        setValidationResult(result.validation_result);
+        setIsProcessing(false);
+        setProcessingStatus('');
+        return;
+      }
       
       onProcessingComplete(result);
       setProcessingStatus('Processing completed successfully!');
@@ -152,29 +161,16 @@ const FileUpload = ({ onProcessingComplete }) => {
               Other
             </button>
           </div>
-        </div>
-
-        <div className="form-group">
-          <label>Environment:</label>
-          <div className="toggle-group">
-            <div className="toggle-container">
-              <span>Production</span>
-              <label className="switch">
-                <input
-                  type="checkbox"
-                  checked={isSandbox}
-                  onChange={(e) => setIsSandbox(e.target.checked)}
-                />
-                <span className="slider round"></span>
-              </label>
-              <span>Sandbox</span>
-            </div>
-            {isSandbox && (
-              <div className="sandbox-message">
-                Anonymize email addresses
-              </div>
-            )}
-          </div>
+          {vaultProvider === 'Other' && (
+            <input
+              type="text"
+              placeholder="Enter vault provider name"
+              value={vaultProvider === 'Other' ? '' : vaultProvider}
+              onChange={(e) => setVaultProvider(e.target.value)}
+              className="other-vault-input"
+              required
+            />
+          )}
         </div>
 
         <div className="form-group">
@@ -195,6 +191,31 @@ const FileUpload = ({ onProcessingComplete }) => {
               Bluesnap
             </button>
           </div>
+        </div>
+
+        <div className="form-group">
+          <label>Environment:</label>
+          <div className="environment-selection">
+            <button
+              type="button"
+              className={`environment-btn ${!isSandbox ? 'selected' : ''}`}
+              onClick={() => setIsSandbox(false)}
+            >
+              Production
+            </button>
+            <button
+              type="button"
+              className={`environment-btn ${isSandbox ? 'selected' : ''}`}
+              onClick={() => setIsSandbox(true)}
+            >
+              Sandbox
+            </button>
+          </div>
+          {isSandbox && (
+            <div className="sandbox-message">
+              Anonymize email addresses
+            </div>
+          )}
         </div>
 
         <div className="form-group">
@@ -246,13 +267,49 @@ const FileUpload = ({ onProcessingComplete }) => {
         </div>
 
         <button type="submit" disabled={isProcessing} className="submit-btn">
-          {isProcessing ? 'Processing...' : 'Process Migration'}
+          {isProcessing ? (
+            <div className="loading-spinner">
+              <div className="spinner"></div>
+              <span>Processing...</span>
+            </div>
+          ) : (
+            'Process Migration'
+          )}
         </button>
       </form>
 
       {processingStatus && (
         <div className="processing-status">
           {processingStatus}
+        </div>
+      )}
+
+      {validationResult && (
+        <div className={`validation-result ${validationResult.valid ? 'valid' : 'invalid'}`}>
+          <div className="validation-header">
+            <span className="validation-icon">
+              {validationResult.valid ? '✓' : '✗'}
+            </span>
+            <span className="validation-title">
+              {validationResult.valid ? 'Column validation passed' : 'Column validation failed'}
+            </span>
+          </div>
+          <div className="validation-details">
+            <p>Please include all columns from the template file even if they are empty.</p>
+            {validationResult.valid && validationResult.optional_columns.length > 0 && (
+              <p>Including {validationResult.optional_columns.length} optional columns</p>
+            )}
+            {!validationResult.valid && (
+              <div className="missing-columns">
+                <p><strong>Missing required columns:</strong></p>
+                <ul>
+                  {validationResult.missing_columns.map((col, index) => (
+                    <li key={index}>{col}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

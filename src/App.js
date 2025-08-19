@@ -23,10 +23,6 @@ function App() {
 
       <main className="App-main">
         <div className="main-content">
-          <div className="description-section">
-            <p>Upload your CSV files to map payment tokens to subscription data</p>
-          </div>
-
           {!results ? (
             <FileUpload onProcessingComplete={handleProcessingComplete} />
           ) : (
