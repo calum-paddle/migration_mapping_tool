@@ -12,7 +12,8 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [error, setError] = useState(null);
   const [subscriberRecordCount, setSubscriberRecordCount] = useState(0);
   const [mappingRecordCount, setMappingRecordCount] = useState(0);
-  const [validationResult, setValidationResult] = useState(null);
+  const [validationResults, setValidationResults] = useState([]);
+  const [currentValidationStep, setCurrentValidationStep] = useState('');
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -56,6 +57,7 @@ const FileUpload = ({ onProcessingComplete }) => {
 
     try {
       setProcessingStatus('Uploading files...');
+      setCurrentValidationStep('column_validation');
       const response = await fetch('/api/process-migration', {
         method: 'POST',
         body: formData,
@@ -82,11 +84,36 @@ const FileUpload = ({ onProcessingComplete }) => {
       const result = await response.json();
       
       // Check if validation failed
-      if (result.error && result.step === 'column_validation') {
-        setValidationResult(result.validation_result);
+      if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation')) {
+        // Add any previous successful validations first
+        if (result.validation_results) {
+          const previousValidations = result.validation_results.map(validation => ({
+            ...validation,
+            timestamp: Date.now()
+          }));
+          setValidationResults(prev => [...prev, ...previousValidations]);
+        }
+        
+        // Then add the failed validation
+        const newValidation = {
+          ...result.validation_result,
+          step: result.step,
+          timestamp: Date.now()
+        };
+        setValidationResults(prev => [...prev, newValidation]);
         setIsProcessing(false);
         setProcessingStatus('');
+        setCurrentValidationStep('');
         return;
+      }
+      
+      // Handle successful validation results
+      if (result.validation_results) {
+        const newValidations = result.validation_results.map(validation => ({
+          ...validation,
+          timestamp: Date.now()
+        }));
+        setValidationResults(prev => [...prev, ...newValidations]);
       }
       
       onProcessingComplete(result);
@@ -98,6 +125,13 @@ const FileUpload = ({ onProcessingComplete }) => {
     }
   };
 
+  const resetValidationState = () => {
+    setValidationResults([]);
+    setError(null);
+    setProcessingStatus('');
+    setCurrentValidationStep('');
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -106,8 +140,9 @@ const FileUpload = ({ onProcessingComplete }) => {
       return;
     }
 
+    // Reset all validation state when starting a new process
+    resetValidationState();
     setIsProcessing(true);
-    setError(null);
     setProcessingStatus('Processing migration...');
 
     try {
@@ -281,37 +316,87 @@ const FileUpload = ({ onProcessingComplete }) => {
       {processingStatus && (
         <div className="processing-status">
           {processingStatus}
+          {currentValidationStep && (
+            <div className="validation-progress">
+              {currentValidationStep === 'column_validation' && 'Column validation in progress...'}
+              {currentValidationStep === 'card_token_validation' && 'Bluesnap card token validation in progress...'}
+            </div>
+          )}
         </div>
       )}
 
-      {validationResult && (
-        <div className={`validation-result ${validationResult.valid ? 'valid' : 'invalid'}`}>
+      {validationResults.map((validation, index) => (
+        <div key={validation.timestamp || index} className={`validation-result ${validation.valid ? 'valid' : 'invalid'}`}>
           <div className="validation-header">
             <span className="validation-icon">
-              {validationResult.valid ? '✓' : '✗'}
+              {validation.valid ? '✓' : '✗'}
             </span>
             <span className="validation-title">
-              {validationResult.valid ? 'Column validation passed' : 'Column validation failed'}
+              {validation.step === 'column_validation' 
+                ? (validation.valid ? 'Column validation passed' : 'Column validation failed')
+                : (validation.valid ? 'Card token validation passed' : 'Card token validation failed')
+              }
             </span>
+            {!validation.valid && validation.download_file && (
+              <button 
+                className="download-report-btn"
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.href = `http://localhost:5001/api/download/${validation.download_file}`;
+                  link.download = validation.download_file;
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                title="Download incorrect records report"
+              >
+                📥
+              </button>
+            )}
           </div>
           <div className="validation-details">
-            <p>Please include all columns from the template file even if they are empty.</p>
-            {validationResult.valid && validationResult.optional_columns.length > 0 && (
-              <p>Including {validationResult.optional_columns.length} optional columns</p>
-            )}
-            {!validationResult.valid && (
-              <div className="missing-columns">
-                <p><strong>Missing required columns:</strong></p>
-                <ul>
-                  {validationResult.missing_columns.map((col, index) => (
-                    <li key={index}>{col}</li>
-                  ))}
-                </ul>
-              </div>
+            {validation.step === 'column_validation' ? (
+              <>
+                {validation.valid ? (
+                  <>
+                    {validation.optional_columns && validation.optional_columns.length > 0 && (
+                      <p>Including {validation.optional_columns.length} optional columns</p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p>Please include all columns from the template file even if they are empty.</p>
+                    {validation.missing_columns && (
+                      <div className="missing-columns">
+                        <p><strong>Missing required columns:</strong></p>
+                        <ul>
+                          {validation.missing_columns.map((col, colIndex) => (
+                            <li key={colIndex}>{col}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            ) : (
+              <>
+                {validation.valid ? (
+                  <p>All {validation.total_records} card tokens are correctly formatted.</p>
+                ) : (
+                  <>
+                    <p>Bluesnap card tokens must be exactly 13 numerical characters.</p>
+                    <div className="missing-columns">
+                      <p><strong>Found {validation.incorrect_count} card tokens with incorrect format.</strong></p>
+                      <p>Click the download icon to get a report of all incorrect records.</p>
+                    </div>
+                  </>
+                )}
+              </>
             )}
           </div>
         </div>
-      )}
+      ))}
 
       {error && (
         <div className="error-message">

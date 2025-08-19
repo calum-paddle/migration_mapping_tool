@@ -98,7 +98,7 @@ def process_migration_api():
         )
         
         # Check if validation failed
-        if 'error' in result and result.get('step') == 'column_validation':
+        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation']:
             # Clean up uploaded files
             os.remove(subscriber_path)
             os.remove(mapping_path)
@@ -126,6 +126,8 @@ def download_file(filename):
         print(f"Looking for file: {file_path}")
         print(f"File exists: {os.path.exists(file_path)}")
         print(f"Absolute path: {os.path.abspath(file_path)}")
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Output folder: {app.config['OUTPUT_FOLDER']}")
         
         if os.path.exists(file_path):
             print(f"File size: {os.path.getsize(file_path)} bytes")

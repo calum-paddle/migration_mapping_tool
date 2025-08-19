@@ -94,6 +94,52 @@ def validate_subscriber_columns(columns):
         'required_columns_count': len(required_columns)
     }
 
+def validate_bluesnap_card_tokens(subscriber_data):
+    """
+    Validate that Bluesnap card tokens are exactly 13 numerical characters
+    
+    Args:
+        subscriber_data: DataFrame containing subscriber data
+    
+    Returns:
+        dict: Validation results with status and incorrect records
+    """
+    import re
+    
+    try:
+        # Check if card_token column exists
+        if 'card_token' not in subscriber_data.columns:
+            return {
+                'valid': False,
+                'error': 'card_token column not found',
+                'incorrect_count': 0,
+                'incorrect_records': None
+            }
+        
+        # Filter out rows where card_token is null/empty
+        valid_data = subscriber_data[subscriber_data['card_token'].notna() & (subscriber_data['card_token'] != '')]
+        
+        # Check each card_token for exactly 13 numerical characters
+        pattern = r'^\d{13}$'
+        incorrect_mask = ~valid_data['card_token'].astype(str).str.match(pattern)
+        incorrect_records = valid_data[incorrect_mask]
+        
+        return {
+            'valid': len(incorrect_records) == 0,
+            'incorrect_count': len(incorrect_records),
+            'incorrect_records': incorrect_records,
+            'total_records': len(valid_data)
+        }
+    except Exception as e:
+        print(f"Error in card token validation: {e}")
+        return {
+            'valid': False,
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'download_file': None
+        }
+
 def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name=''):
     """
     Process migration from payment providers to Paddle Billing
@@ -140,14 +186,12 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     if hasattr(subscriber_file, 'read'):
         # File object from React
         subscribedata = pd.read_csv(subscriber_file,
-                                  parse_dates=['current_period_started_at'],
                                   dtype={'postal_code': object},
                                   keep_default_na=False, na_values=['_'])
         subscriber_filename = subscriber_file.name
     else:
         # File path
         subscribedata = pd.read_csv(subscriber_file,
-                                  parse_dates=['current_period_started_at'],
                                   dtype={'postal_code': object},
                                   keep_default_na=False, na_values=['_'])
         subscriber_filename = os.path.basename(subscriber_file)
@@ -170,10 +214,84 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         return {
             'error': 'Column validation failed',
             'validation_result': validation_result,
-            'step': 'column_validation'
+            'step': 'column_validation',
+            'validation_results': []  # No previous validations to show
         }
     
     print(f"Column validation passed. Found {validation_result['total_columns']} columns including {len(validation_result['optional_columns'])} optional columns.")
+    
+    # Add successful column validation to results
+    validation_results = [{
+        'valid': True,
+        'step': 'column_validation',
+        'total_columns': validation_result['total_columns'],
+        'optional_columns': validation_result['optional_columns']
+    }]
+    
+    # Bluesnap card token validation (only for Bluesnap provider)
+    if provider.lower() == 'bluesnap':
+        print("Validating Bluesnap card tokens...")
+        try:
+            card_token_validation = validate_bluesnap_card_tokens(subscribedata)
+        except Exception as e:
+            print(f"Error during card token validation: {e}")
+            return {
+                'error': 'Card token validation error',
+                'validation_result': {
+                    'valid': False,
+                    'error': f'Validation error: {str(e)}',
+                    'incorrect_count': 0,
+                    'total_records': 0,
+                    'download_file': None
+                },
+                'step': 'card_token_validation',
+                'validation_results': validation_results  # Include previous successful validations
+            }
+        
+        if not card_token_validation['valid']:
+            print(f"Card token validation failed. Found {card_token_validation['incorrect_count']} incorrect formats.")
+            
+            # Save incorrect records to a file for download
+            if card_token_validation['incorrect_records'] is not None:
+                try:
+                    # Use the same output directory as the server
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    
+                    incorrect_filename = f"incorrect_card_tokens_{int(time.time())}.csv"
+                    incorrect_path = os.path.join(output_dir, incorrect_filename)
+                    card_token_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                    card_token_validation['download_file'] = incorrect_filename
+                    print(f"Saved incorrect records to: {incorrect_path}")
+                    print(f"File exists after save: {os.path.exists(incorrect_path)}")
+                except Exception as e:
+                    print(f"Error saving incorrect records file: {e}")
+                    # Continue without download file if saving fails
+                    card_token_validation['download_file'] = None
+            
+            # Convert DataFrame to list of dictionaries for JSON serialization
+            validation_result_for_json = {
+                'valid': card_token_validation['valid'],
+                'incorrect_count': card_token_validation['incorrect_count'],
+                'total_records': card_token_validation['total_records'],
+                'download_file': card_token_validation.get('download_file')
+            }
+            
+            return {
+                'error': 'Card token validation failed',
+                'validation_result': validation_result_for_json,
+                'step': 'card_token_validation',
+                'validation_results': validation_results  # Include previous successful validations
+            }
+        
+        print(f"Card token validation passed. All {card_token_validation['total_records']} card tokens are correctly formatted.")
+        
+        # Add successful card token validation to results
+        validation_results.append({
+            'valid': True,
+            'step': 'card_token_validation',
+            'total_records': card_token_validation['total_records']
+        })
     
     # Provider-specific data processing
     if provider.lower() == 'bluesnap':
@@ -441,12 +559,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         print("Email addresses anonymized for sandbox")
     
     print("Processing date formatting...")
-    # Reformat 'current_period_started_at' to desired format
-    if 'current_period_started_at' in completed.columns:
-        completed['current_period_started_at'] = completed['current_period_started_at'].dt.strftime('%Y-%m-%dT%H:%M:%SZ')
-        print("Date formatting completed")
-    else:
-        print("Warning: current_period_started_at column not found")
+    # Keep original date format - no parsing or reformatting needed
+    print("Date columns left in original format")
     
     print("Adding vault_provider column...")
     # Add vault_provider column
@@ -521,7 +635,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         'total_processed': len(completed),
         'processing_time': f"{processing_time:.2f} seconds",
         'output_files': output_files,
-        'environment': 'Sandbox' if is_sandbox else 'Production'
+        'environment': 'Sandbox' if is_sandbox else 'Production',
+        'validation_results': validation_results
     }
     
     print('Success')
