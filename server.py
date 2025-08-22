@@ -57,6 +57,9 @@ def process_migration_api():
         vault_provider = request.form.get('vault_provider', '')
         is_sandbox = request.form.get('is_sandbox', 'false').lower() == 'true'
         provider = request.form.get('provider', 'stripe')
+        autocorrect_us_postal = request.form.get('autocorrect_us_postal', 'false').lower() == 'true'
+        use_mapping_postal_codes = request.form.get('use_mapping_postal_codes', 'false').lower() == 'true'
+        proceed_without_missing_records = request.form.get('proceed_without_missing_records', 'false').lower() == 'true'
         
         # Validate files
         if subscriber_file.filename == '':
@@ -94,11 +97,14 @@ def process_migration_api():
             vault_provider, 
             is_sandbox, 
             provider, 
-            seller_name
+            seller_name,
+            autocorrect_us_postal,
+            use_mapping_postal_codes,
+            proceed_without_missing_records
         )
         
         # Check if validation failed
-        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation', 'date_validation']:
+        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation', 'date_validation', 'ca_postal_code_validation', 'us_postal_code_validation', 'missing_postal_code_validation']:
             # Clean up uploaded files
             os.remove(subscriber_path)
             os.remove(mapping_path)
@@ -183,7 +189,7 @@ def continue_processing():
         print(f"User chose: {user_choice} for step: {step}")
         
         # Handle different user choices
-        if user_choice == 'stop_processing':
+        if user_choice == 'stop_processing' or user_choice == 'cancel':
             return jsonify({
                 'status': 'stopped_by_user',
                 'message': 'Processing stopped by user request'
@@ -199,8 +205,37 @@ def continue_processing():
             # Continue processing with duplicates
             return jsonify({
                 'status': 'continuing',
-                'message': 'Continuing with duplicates included'
+                'message': 'Continuing with duplicates'
             })
+        elif user_choice == 'autocorrect_leading_zeros':
+            # Autocorrect US postal codes with leading zeros
+            try:
+                # For now, return a simple response indicating autocorrect was requested
+                # The actual autocorrect logic should be handled in the main processing flow
+                return jsonify({
+                    'status': 'autocorrect_requested',
+                    'message': 'Autocorrect leading zeros requested'
+                })
+            except Exception as e:
+                return jsonify({'error': f'Autocorrect failed: {str(e)}'}), 500
+        elif user_choice == 'use_mapping_postal_codes':
+            # Use mapping postal codes to fill missing postal codes
+            try:
+                return jsonify({
+                    'status': 'mapping_postal_codes_requested',
+                    'message': 'Use mapping postal codes requested'
+                })
+            except Exception as e:
+                return jsonify({'error': f'Use mapping postal codes failed: {str(e)}'}), 500
+        elif user_choice == 'proceed_without_missing_records':
+            # Proceed without missing records
+            try:
+                return jsonify({
+                    'status': 'proceed_without_missing_records_requested',
+                    'message': 'Proceed without missing records requested'
+                })
+            except Exception as e:
+                return jsonify({'error': f'Proceed without missing records failed: {str(e)}'}), 500
         else:
             return jsonify({'error': 'Invalid user choice'}), 400
             
