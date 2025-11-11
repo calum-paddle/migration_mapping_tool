@@ -283,11 +283,15 @@ def validate_missing_postal_codes(data, provider, seller_name='', is_sandbox=Fal
             (required_records['address_postal_code'].astype(str).str.strip() == '')
         ].copy()
         
-        if len(missing_postal_codes) == 0:
+        # Calculate missing_count early so we can preserve it even if an exception occurs later
+        missing_count = len(missing_postal_codes)
+        total_records_count = len(required_records)
+        
+        if missing_count == 0:
             return {
                 'valid': True,
                 'missing_count': 0,
-                'total_records': len(required_records),
+                'total_records': total_records_count,
                 'available_from_mapping': 0,
                 'missing_records': None
             }
@@ -296,32 +300,47 @@ def validate_missing_postal_codes(data, provider, seller_name='', is_sandbox=Fal
         mapping_column = 'card.address_zip' if provider.lower() == 'stripe' else 'Zip Code'
         
         # Count records that have postal codes available in mapping file (already merged)
-        available_from_mapping = missing_postal_codes[
-            missing_postal_codes[mapping_column].notna() & 
-            (missing_postal_codes[mapping_column].astype(str).str.strip() != '')
-        ]
-        available_count = len(available_from_mapping)
+        # Check if mapping column exists before trying to use it
+        available_count = 0
+        if mapping_column in missing_postal_codes.columns:
+            try:
+                available_from_mapping = missing_postal_codes[
+                    missing_postal_codes[mapping_column].notna() & 
+                    (missing_postal_codes[mapping_column].astype(str).str.strip() != '')
+                ]
+                available_count = len(available_from_mapping)
+            except Exception as e:
+                print(f"Warning: Error counting available postal codes from mapping: {e}")
+                available_count = 0
         
         # Convert all columns to strings to prevent float conversion in CSV
-        if not missing_postal_codes.empty:
-            for col in missing_postal_codes.columns:
-                missing_postal_codes[col] = missing_postal_codes[col].fillna('').astype(str).replace('nan', '')
-                missing_postal_codes[col] = missing_postal_codes[col].str.replace(r'\.0$', '', regex=True)
+        # Wrap this in try/except to preserve missing_count even if conversion fails
+        try:
+            if not missing_postal_codes.empty:
+                for col in missing_postal_codes.columns:
+                    missing_postal_codes[col] = missing_postal_codes[col].fillna('').astype(str).replace('nan', '')
+                    missing_postal_codes[col] = missing_postal_codes[col].str.replace(r'\.0$', '', regex=True)
+        except Exception as e:
+            print(f"Warning: Error converting columns to strings: {e}")
+            # Continue with unconverted data - missing_count is still valid
         
         return {
             'valid': False,
-            'missing_count': len(missing_postal_codes),
-            'total_records': len(required_records),
+            'missing_count': missing_count,
+            'total_records': total_records_count,
             'available_from_mapping': available_count,
             'missing_records': missing_postal_codes
         }
         
     except Exception as e:
         print(f"Error in missing postal code validation: {e}")
+        import traceback
+        traceback.print_exc()
+        # Try to preserve any counts we might have calculated
         return {
             'valid': False,
             'error': f'Validation error: {str(e)}',
-            'missing_count': 0,
+            'missing_count': 0,  # Can't preserve count if exception occurs before calculation
             'total_records': 0,
             'available_from_mapping': 0,
             'missing_records': None
@@ -560,73 +579,74 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     }]
     
     # Bluesnap card token validation (only for Bluesnap provider)
-    if provider.lower() == 'bluesnap':
-        print("Validating Bluesnap card tokens...")
-        try:
-            card_token_validation = validate_bluesnap_card_tokens(subscribedata, seller_name, is_sandbox)
-        except Exception as e:
-            print(f"Error during card token validation: {e}")
-            return {
-                'error': 'Card token validation error',
-                'validation_result': {
-                    'valid': False,
-                    'error': f'Validation error: {str(e)}',
-                    'incorrect_count': 0,
-                    'total_records': 0,
-                    'download_file': None
-                },
-                'step': 'card_token_validation',
-                'validation_results': validation_results  # Include previous successful validations
-            }
-        
-        if not card_token_validation['valid']:
-            print(f"Card token validation failed. Found {card_token_validation['incorrect_count']} incorrect formats.")
-            
-            # Save incorrect records to a file for download
-            if card_token_validation['incorrect_records'] is not None:
-                try:
-                    # Use the same output directory as the server
-                    output_dir = 'outputs'
-                    os.makedirs(output_dir, exist_ok=True)
-                    
-                    # Create filename with seller name and environment
-                    clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-                    clean_seller_name = clean_seller_name.replace(' ', '_')
-                    env_suffix = "_sandbox" if is_sandbox else "_production"
-                    incorrect_filename = f"{clean_seller_name}_incorrect_card_tokens{env_suffix}_{int(time.time())}.csv"
-                    incorrect_path = os.path.join(output_dir, incorrect_filename)
-                    card_token_validation['incorrect_records'].to_csv(incorrect_path, index=False)
-                    card_token_validation['download_file'] = incorrect_filename
-                    print(f"Saved incorrect records to: {incorrect_path}")
-                    print(f"File exists after save: {os.path.exists(incorrect_path)}")
-                except Exception as e:
-                    print(f"Error saving incorrect records file: {e}")
-                    # Continue without download file if saving fails
-                    card_token_validation['download_file'] = None
-            
-            # Convert DataFrame to list of dictionaries for JSON serialization
-            validation_result_for_json = {
-                'valid': card_token_validation['valid'],
-                'incorrect_count': card_token_validation['incorrect_count'],
-                'total_records': card_token_validation['total_records'],
-                'download_file': card_token_validation.get('download_file')
-            }
-            
-            return {
-                'error': 'Card token validation failed',
-                'validation_result': validation_result_for_json,
-                'step': 'card_token_validation',
-                'validation_results': validation_results  # Include previous successful validations
-            }
-        
-        print(f"Card token validation passed. All {card_token_validation['total_records']} card tokens are correctly formatted.")
-        
-        # Add successful card token validation to results
-        validation_results.append({
-            'valid': True,
-            'step': 'card_token_validation',
-            'total_records': card_token_validation['total_records']
-        })
+    # COMMENTED OUT: Skipping card token length validation
+    # if provider.lower() == 'bluesnap':
+    #     print("Validating Bluesnap card tokens...")
+    #     try:
+    #         card_token_validation = validate_bluesnap_card_tokens(subscribedata, seller_name, is_sandbox)
+    #     except Exception as e:
+    #         print(f"Error during card token validation: {e}")
+    #         return {
+    #             'error': 'Card token validation error',
+    #             'validation_result': {
+    #                 'valid': False,
+    #                 'error': f'Validation error: {str(e)}',
+    #                 'incorrect_count': 0,
+    #                 'total_records': 0,
+    #                 'download_file': None
+    #             },
+    #             'step': 'card_token_validation',
+    #             'validation_results': validation_results  # Include previous successful validations
+    #         }
+    #     
+    #     if not card_token_validation['valid']:
+    #         print(f"Card token validation failed. Found {card_token_validation['incorrect_count']} incorrect formats.")
+    #         
+    #         # Save incorrect records to a file for download
+    #         if card_token_validation['incorrect_records'] is not None:
+    #             try:
+    #                 # Use the same output directory as the server
+    #                 output_dir = 'outputs'
+    #                 os.makedirs(output_dir, exist_ok=True)
+    #                 
+    #                 # Create filename with seller name and environment
+    #                 clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+    #                 clean_seller_name = clean_seller_name.replace(' ', '_')
+    #                 env_suffix = "_sandbox" if is_sandbox else "_production"
+    #                 incorrect_filename = f"{clean_seller_name}_incorrect_card_tokens{env_suffix}_{int(time.time())}.csv"
+    #                 incorrect_path = os.path.join(output_dir, incorrect_filename)
+    #                 card_token_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+    #                 card_token_validation['download_file'] = incorrect_filename
+    #                 print(f"Saved incorrect records to: {incorrect_path}")
+    #                 print(f"File exists after save: {os.path.exists(incorrect_path)}")
+    #             except Exception as e:
+    #                 print(f"Error saving incorrect records file: {e}")
+    #                 # Continue without download file if saving fails
+    #                 card_token_validation['download_file'] = None
+    #         
+    #         # Convert DataFrame to list of dictionaries for JSON serialization
+    #         validation_result_for_json = {
+    #             'valid': card_token_validation['valid'],
+    #             'incorrect_count': card_token_validation['incorrect_count'],
+    #             'total_records': card_token_validation['total_records'],
+    #             'download_file': card_token_validation.get('download_file')
+    #         }
+    #         
+    #         return {
+    #             'error': 'Card token validation failed',
+    #             'validation_result': validation_result_for_json,
+    #             'step': 'card_token_validation',
+    #             'validation_results': validation_results  # Include previous successful validations
+    #         }
+    #     
+    #     print(f"Card token validation passed. All {card_token_validation['total_records']} card tokens are correctly formatted.")
+    #     
+    #     # Add successful card token validation to results
+    #     validation_results.append({
+    #         'valid': True,
+    #         'step': 'card_token_validation',
+    #         'total_records': card_token_validation['total_records']
+    #     })
     
     # Date period validation (for all providers)
     print("Validating date periods...")
@@ -763,8 +783,14 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         # Keep only rows where `card_token` is not null
         finaljoin = finaljoin[finaljoin['card_token'].notna()]
         
+        # Check for duplicate card_tokens BEFORE replacing with full card number
+        # This identifies duplicates based on the original merge key (Account ID + last 4)
+        duplicate_token_mask = finaljoin.duplicated(subset='card_token', keep=False)
+        finaljoin['is_duplicate_token'] = duplicate_token_mask
+        
         # Replace `card_token` in the final DataFrame with the original `Credit Card Number` from the mapping data
-        finaljoin['card_token'] = finaljoin['original_credit_card_number']
+        finaljoin.loc[finaljoin['original_credit_card_number'].notna(), 'card_token'] = \
+            finaljoin.loc[finaljoin['original_credit_card_number'].notna(), 'original_credit_card_number']
         
         # Drop the 'original_credit_card_number' column, as we no longer need it in the final output
         finaljoin = finaljoin.drop(columns=['original_credit_card_number'])
@@ -789,6 +815,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         
         # Filter null card_ids after merge (like original)
         finaljoin = finaljoin[finaljoin['card_id'].notna()]
+        
+        # Check for duplicate card_ids BEFORE renaming card.number to card_token
+        # This identifies duplicates based on the original merge key (card_id)
+        duplicate_token_mask = finaljoin.duplicated(subset='card_id', keep=False)
+        finaljoin['is_duplicate_token'] = duplicate_token_mask
         
         # Rename columns as required (like original)
         completed = finaljoin.rename(columns={
@@ -1156,6 +1187,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         
         # Reorder columns to match Stripe specification
         existing_columns = [col for col in stripe_column_order if col in completed.columns]
+        # Preserve is_duplicate_token flag if it exists (needed for duplicate detection)
+        if 'is_duplicate_token' in completed.columns and 'is_duplicate_token' not in existing_columns:
+            existing_columns.append('is_duplicate_token')
         completed = completed[existing_columns]
         
     else:  # Bluesnap
@@ -1166,6 +1200,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         
         # Reorder columns to match Bluesnap specification
         existing_columns = [col for col in bluesnap_column_order if col in completed.columns]
+        # Preserve is_duplicate_token flag if it exists (needed for duplicate detection)
+        if 'is_duplicate_token' in completed.columns and 'is_duplicate_token' not in existing_columns:
+            existing_columns.append('is_duplicate_token')
         completed = completed[existing_columns]
     
     print("Filtering rows with customer_email...")
@@ -1394,16 +1431,26 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     print("Starting duplicate detection...")
     
+    # Find all rows where card_token appears more than once
+    # For both Bluesnap and Stripe: use the flag set before card_token was replaced/renamed
+    # This checks duplicates based on the original merge key, not the final card_token value
+    if 'is_duplicate_token' in completed.columns:
+        duplicate_tokens = completed[completed['is_duplicate_token'] == True]
+        # Drop the flag column from both completed and duplicate_tokens as it's only used for duplicate detection
+        if 'is_duplicate_token' in duplicate_tokens.columns:
+            duplicate_tokens = duplicate_tokens.drop(columns=['is_duplicate_token'])
+        completed = completed.drop(columns=['is_duplicate_token'])
+    else:
+        # Fallback: check duplicates in card_token (shouldn't happen with current logic)
+        duplicate_tokens = completed[completed['card_token'].notna() & completed.duplicated(subset='card_token', keep=False)]
+    print(f"Duplicate tokens records: {len(duplicate_tokens)}")
+    
     # Duplicate detection (same for both environments)
     success = completed[completed['card_token'].notna()]
     print(f"Success records: {len(success)}")
     
     no_tokens = completed[completed['card_token'].isnull()]
     print(f"No tokens records: {len(no_tokens)}")
-    
-    # Find all rows where card_token appears more than once
-    duplicate_tokens = completed[completed['card_token'].notna() & completed.duplicated(subset='card_token', keep=False)]
-    print(f"Duplicate tokens records: {len(duplicate_tokens)}")
     
     # Find all rows where card_id appears more than once (only for Stripe)
     duplicate_card_ids = pd.DataFrame()
