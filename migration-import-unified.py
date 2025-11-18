@@ -143,6 +143,91 @@ def validate_bluesnap_card_tokens(subscriber_data, seller_name='', is_sandbox=Fa
             'download_file': None
         }
 
+def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
+    """
+    Validate that current_period_started_at and current_period_ends_at dates are in the correct format
+    - Format must be: YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-07-06T00:00:00Z)
+    
+    Args:
+        subscriber_data: DataFrame containing subscriber data
+        seller_name: Name of the seller for file naming
+        is_sandbox: Boolean indicating if this is sandbox mode
+    
+    Returns:
+        dict: Validation results with status and incorrect records
+    """
+    import re
+    
+    try:
+        # Check if required columns exist
+        required_columns = ['current_period_started_at', 'current_period_ends_at']
+        missing_columns = [col for col in required_columns if col not in subscriber_data.columns]
+        
+        if missing_columns:
+            return {
+                'valid': False,
+                'error': f'Missing required columns: {missing_columns}',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'incorrect_records': None
+            }
+        
+        # Create a copy of the data for validation (don't modify original)
+        validation_data = subscriber_data.copy()
+        
+        # Expected format: YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-07-06T00:00:00Z)
+        date_format_pattern = r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
+        
+        # Check format for both date columns
+        # Convert to string, handling NaN values
+        # Note: If dates were already parsed as datetime objects by pandas, 
+        # we check their string representation. The validation ensures the original
+        # CSV format matches the required pattern.
+        def check_date_format(value):
+            if pd.isna(value):
+                return False
+            # Convert to string
+            value_str = str(value)
+            # Check for common NaN representations
+            if value_str.lower() in ['nan', 'none', 'nat', '']:
+                return False
+            # Check if it matches the exact required format
+            return bool(re.match(date_format_pattern, value_str))
+        
+        started_valid = validation_data['current_period_started_at'].apply(check_date_format)
+        ended_valid = validation_data['current_period_ends_at'].apply(check_date_format)
+        
+        # Find records where either date has incorrect format
+        incorrect_format_mask = ~(started_valid & ended_valid)
+        incorrect_records = validation_data[incorrect_format_mask].copy()
+        
+        # Convert all columns to strings to prevent float conversion in CSV
+        if not incorrect_records.empty:
+            for col in incorrect_records.columns:
+                # Handle NaN values and ensure all data is string
+                incorrect_records[col] = incorrect_records[col].fillna('').astype(str).replace('nan', '')
+                # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
+                incorrect_records[col] = incorrect_records[col].str.replace(r'\.0$', '', regex=True)
+        
+        return {
+            'valid': len(incorrect_records) == 0,
+            'incorrect_count': len(incorrect_records),
+            'incorrect_records': incorrect_records,
+            'total_records': len(validation_data)
+        }
+        
+    except Exception as e:
+        print(f"Error in date format validation: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'valid': False,
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'incorrect_records': None
+        }
+
 def validate_date_periods(subscriber_data, seller_name='', is_sandbox=False):
     """
     Validate that current_period_started_at and current_period_ends_at dates are logical
@@ -154,9 +239,6 @@ def validate_date_periods(subscriber_data, seller_name='', is_sandbox=False):
         seller_name: Name of the seller for file naming
         is_sandbox: Boolean indicating if this is sandbox mode
     """
-    from datetime import datetime
-    import pandas as pd
-    
     try:
         # Check if required columns exist
         required_columns = ['current_period_started_at', 'current_period_ends_at']
@@ -647,6 +729,90 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     #         'step': 'card_token_validation',
     #         'total_records': card_token_validation['total_records']
     #     })
+    
+    # Date format validation (for all providers) - must be before date period validation
+    print("Validating date formats...")
+    try:
+        date_format_validation = validate_date_format(subscribedata, seller_name, is_sandbox)
+    except Exception as e:
+        print(f"Error during date format validation: {e}")
+        return {
+            'error': 'Date format validation error',
+            'validation_result': {
+                'valid': False,
+                'error': f'Validation error: {str(e)}',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'download_file': None
+            },
+            'step': 'date_format_validation',
+            'validation_results': validation_results
+        }
+    
+    if not date_format_validation['valid']:
+        print(f"Date format validation failed. Found {date_format_validation['incorrect_count']} records with incorrect date formats.")
+        
+        # Save incorrect records to a file for download
+        if date_format_validation['incorrect_records'] is not None:
+            try:
+                output_dir = 'outputs'
+                os.makedirs(output_dir, exist_ok=True)
+                
+                # Create filename with seller name and environment
+                clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                clean_seller_name = clean_seller_name.replace(' ', '_')
+                env_suffix = "_sandbox" if is_sandbox else "_production"
+                incorrect_filename = f"{clean_seller_name}_invalid_date_formats{env_suffix}_{int(time.time())}.csv"
+                incorrect_path = os.path.join(output_dir, incorrect_filename)
+                date_format_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                date_format_validation['download_file'] = incorrect_filename
+                print(f"Saved incorrect records to: {incorrect_path}")
+                print(f"File exists after save: {os.path.exists(incorrect_path)}")
+            except Exception as e:
+                print(f"Error saving incorrect records file: {e}")
+                date_format_validation['download_file'] = None
+        
+        # Convert DataFrame to list of dictionaries for JSON serialization
+        validation_result_for_json = {
+            'valid': date_format_validation['valid'],
+            'incorrect_count': date_format_validation['incorrect_count'],
+            'total_records': date_format_validation['total_records'],
+            'download_file': date_format_validation.get('download_file')
+        }
+        
+        print(f"Returning date format validation failure with {len(validation_results)} previous validations")
+        
+        # Ensure validation_results is JSON serializable
+        clean_validation_results = []
+        for validation in validation_results:
+            clean_validation = {
+                'valid': validation['valid'],
+                'step': validation['step']
+            }
+            # Add other fields if they exist and are JSON serializable
+            if 'total_columns' in validation:
+                clean_validation['total_columns'] = validation['total_columns']
+            if 'optional_columns' in validation:
+                clean_validation['optional_columns'] = validation['optional_columns']
+            if 'total_records' in validation:
+                clean_validation['total_records'] = validation['total_records']
+            clean_validation_results.append(clean_validation)
+        
+        return {
+            'error': 'Date format validation failed',
+            'validation_result': validation_result_for_json,
+            'step': 'date_format_validation',
+            'validation_results': clean_validation_results
+        }
+    
+    print(f"Date format validation passed. All {date_format_validation['total_records']} date formats are valid.")
+    
+    # Add successful date format validation to results
+    validation_results.append({
+        'valid': True,
+        'step': 'date_format_validation',
+        'total_records': date_format_validation['total_records']
+    })
     
     # Date period validation (for all providers)
     print("Validating date periods...")
@@ -1222,7 +1388,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     print("Adding vault_provider column...")
     # Add vault_provider column
-    completed['vault_provider'] = vault_provider
+    # For Bluesnap sandbox with tokenex, ensure it's lowercase
+    if provider.lower() == 'bluesnap' and is_sandbox and vault_provider.lower() == 'tokenex':
+        completed['vault_provider'] = 'tokenex'
+    else:
+        completed['vault_provider'] = vault_provider
     
     print("Processing enable_checkout column...")
     # Check if 'enable_checkout' exists in the dataframe and convert to upper case if it does

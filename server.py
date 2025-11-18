@@ -104,7 +104,7 @@ def process_migration_api():
         )
         
         # Check if validation failed
-        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation', 'date_validation', 'ca_postal_code_validation', 'us_postal_code_validation', 'missing_postal_code_validation']:
+        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation', 'date_format_validation', 'date_validation', 'ca_postal_code_validation', 'us_postal_code_validation', 'missing_postal_code_validation']:
             # Clean up uploaded files
             os.remove(subscriber_path)
             os.remove(mapping_path)

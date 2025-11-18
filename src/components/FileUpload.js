@@ -124,7 +124,7 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
       
       // Check if validation failed
-      if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation' || result.step === 'date_validation' || result.step === 'ca_postal_code_validation' || result.step === 'us_postal_code_validation' || result.step === 'missing_postal_code_validation')) {
+      if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation' || result.step === 'date_format_validation' || result.step === 'date_validation' || result.step === 'ca_postal_code_validation' || result.step === 'us_postal_code_validation' || result.step === 'missing_postal_code_validation')) {
         // Add any previous successful validations first
         if (result.validation_results) {
           const previousValidations = result.validation_results.map(validation => ({
@@ -475,6 +475,7 @@ const FileUpload = ({ onProcessingComplete }) => {
           {currentValidationStep && (
             <div className="validation-progress">
                         {currentValidationStep === 'column_validation' && 'Column validation in progress...'}
+          {currentValidationStep === 'date_format_validation' && 'Date format validation in progress...'}
           {currentValidationStep === 'date_validation' && 'Date validation in progress...'}
           {currentValidationStep === 'card_token_validation' && 'Bluesnap card token validation in progress...'}
           {currentValidationStep === 'ca_postal_code_validation' && 'Canadian postal code validation in progress...'}
@@ -494,6 +495,8 @@ const FileUpload = ({ onProcessingComplete }) => {
             <span className="validation-title">
               {validation.step === 'column_validation' 
                 ? (validation.valid ? 'Column validation passed' : 'Column validation failed')
+                : validation.step === 'date_format_validation'
+                ? (validation.valid ? 'Date format validation passed' : 'Date format validation failed')
                 : validation.step === 'date_validation'
                 ? (validation.valid ? 'Date validation passed' : 'Date validation failed')
                 : validation.step === 'card_token_validation'
@@ -545,6 +548,18 @@ const FileUpload = ({ onProcessingComplete }) => {
                         </ul>
                       </div>
                     )}
+                  </>
+                )}
+              </>
+            ) : validation.step === 'date_format_validation' ? (
+              <>
+                {!validation.valid && (
+                  <>
+                    <p>Date formats must be in ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-07-06T00:00:00Z).</p>
+                    <div className="missing-columns">
+                      <p><strong>Found {validation.incorrect_count} records with incorrect date formats.</strong></p>
+                      <p>Click the download icon to get a report of all incorrect records.</p>
+                    </div>
                   </>
                 )}
               </>
