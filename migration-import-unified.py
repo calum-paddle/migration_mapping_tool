@@ -1033,22 +1033,51 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     print(f"Missing records card_tokens: {missing_records['card_token'].tolist()}")
                     
                     # For each missing record, copy the postal code from the mapping column to address_postal_code
+                    # Use the row index from missing_records (which corresponds to the row in completed)
                     for idx, row in missing_records.iterrows():
                         card_token = row['card_token']
                         mapping_postal_code = row[mapping_column]
-                        print(f"Processing card_token: {card_token}, mapping postal code: {mapping_postal_code}")
+                        print(f"Processing row {idx}, card_token: {card_token}, mapping postal code: {mapping_postal_code}")
                         
                         if pd.notna(mapping_postal_code) and str(mapping_postal_code).strip() != '':
-                            # Find the corresponding row in the main dataset and update it
-                            main_idx = completed[completed['card_token'] == card_token].index
-                            if len(main_idx) > 0:
-                                completed.loc[main_idx, 'address_postal_code'] = mapping_postal_code
+                            # Basic cleaning: convert to string and strip whitespace
+                            cleaned_postal_code = str(mapping_postal_code).strip()
+                            # Remove .0 suffix if present (from float conversion) - safe for all postal codes
+                            if cleaned_postal_code.endswith('.0'):
+                                cleaned_postal_code = cleaned_postal_code.rstrip('.0')
+                            
+                            # Use the row index directly from missing_records (which corresponds to completed)
+                            # This ensures each row gets its specific postal code from the mapping file
+                            if idx in completed.index:
+                                # Check if this is a US record for additional US-specific cleaning
+                                is_us_record = completed.loc[idx, 'address_country_code'] == 'US' if 'address_country_code' in completed.columns else False
+                                
+                                if is_us_record:
+                                    # For US records only: handle ZIP+4 format and extract digits
+                                    # Handle ZIP+4 format (e.g., "12345-6789" -> "12345")
+                                    if '-' in cleaned_postal_code:
+                                        cleaned_postal_code = cleaned_postal_code.split('-')[0]
+                                    # For US, extract digits only (US postal codes are numeric)
+                                    import re
+                                    digits_only = re.sub(r'\D', '', cleaned_postal_code)
+                                    if digits_only:
+                                        cleaned_postal_code = digits_only
+                                    
+                                    # Warn if US postal code is not in valid format
+                                    if len(cleaned_postal_code) == 4 and cleaned_postal_code.isdigit():
+                                        # 4-digit code - will be handled by autocorrect if needed
+                                        pass
+                                    elif len(cleaned_postal_code) != 5 or not cleaned_postal_code.isdigit():
+                                        print(f"Warning: US postal code '{cleaned_postal_code}' (from mapping: '{mapping_postal_code}') is not in valid format (5 digits or 4 digits).")
+                                
+                                # For non-US records, keep the postal code as-is (may contain letters, spaces, etc.)
+                                completed.loc[idx, 'address_postal_code'] = cleaned_postal_code
                                 updated_count += 1
-                                print(f"Updated record {main_idx[0]} with postal code {mapping_postal_code}")
+                                print(f"Updated row {idx} with postal code {cleaned_postal_code} (cleaned from {mapping_postal_code})")
                             else:
-                                print(f"No matching record found in main dataset for card_token: {card_token}")
+                                print(f"Row index {idx} not found in completed DataFrame")
                         else:
-                            print(f"No valid postal code found in mapping for card_token: {card_token}")
+                            print(f"No valid postal code found in mapping for row {idx}, card_token: {card_token}")
                     
                     print(f"Updated {updated_count} records with postal codes from mapping file.")
                     

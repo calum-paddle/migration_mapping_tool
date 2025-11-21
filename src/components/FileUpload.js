@@ -15,6 +15,7 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [validationResults, setValidationResults] = useState([]);
   const [currentValidationStep, setCurrentValidationStep] = useState('');
   const [waitingForUserInput, setWaitingForUserInput] = useState(false);
+  const [expandedValidations, setExpandedValidations] = useState(new Set());
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -45,6 +46,18 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
     };
     reader.readAsText(file);
+  };
+
+  const toggleValidation = (step) => {
+    setExpandedValidations(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(step)) {
+        newSet.delete(step);
+      } else {
+        newSet.add(step);
+      }
+      return newSet;
+    });
   };
 
   const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, autocorrect = false, useMappingPostal = false, proceedWithoutMissing = false) => {
@@ -102,6 +115,10 @@ const FileUpload = ({ onProcessingComplete }) => {
             timestamp: Date.now()
           }));
           setValidationResults(prev => [...prev, ...previousValidations]);
+          // Expand passed validations
+          previousValidations.filter(v => v.valid).forEach(v => {
+            setExpandedValidations(prev => new Set([...prev, v.step]));
+          });
         }
         
         // Add the validation that requires user input
@@ -111,6 +128,10 @@ const FileUpload = ({ onProcessingComplete }) => {
           timestamp: Date.now()
         };
         setValidationResults(prev => [...prev, newValidation]);
+        // Expand if it's a passed validation
+        if (newValidation.valid) {
+          setExpandedValidations(prev => new Set([...prev, newValidation.step]));
+        }
         setWaitingForUserInput(true);
         setIsProcessing(false);
         setProcessingStatus('');
@@ -131,6 +152,11 @@ const FileUpload = ({ onProcessingComplete }) => {
           timestamp: Date.now()
         }));
         setValidationResults(allValidations);
+        // Initialize expanded state: expand passed validations, collapse failed ones
+        const initialExpanded = new Set(
+          allValidations.filter(v => v.valid).map(v => v.step)
+        );
+        setExpandedValidations(initialExpanded);
         setIsProcessing(false);
         setProcessingStatus('');
         setCurrentValidationStep('');
@@ -151,9 +177,13 @@ const FileUpload = ({ onProcessingComplete }) => {
             timestamp: Date.now()
           }));
           setValidationResults(prev => [...prev, ...previousValidations]);
+          // Expand passed validations
+          previousValidations.filter(v => v.valid).forEach(v => {
+            setExpandedValidations(prev => new Set([...prev, v.step]));
+          });
         }
         
-        // Then add the failed validation
+        // Then add the failed validation (collapsed by default)
         const newValidation = {
           ...result.validation_result,
           step: result.step,
@@ -178,6 +208,10 @@ const FileUpload = ({ onProcessingComplete }) => {
           timestamp: Date.now()
         }));
         setValidationResults(prev => [...prev, ...newValidations]);
+        // Expand passed validations
+        newValidations.filter(v => v.valid).forEach(v => {
+          setExpandedValidations(prev => new Set([...prev, v.step]));
+        });
       }
       
       onProcessingComplete(result);
@@ -196,6 +230,7 @@ const FileUpload = ({ onProcessingComplete }) => {
 
   const resetValidationState = () => {
     setValidationResults([]);
+    setExpandedValidations(new Set());
     setError(null);
     setProcessingStatus('');
     setCurrentValidationStep('');
@@ -505,9 +540,23 @@ const FileUpload = ({ onProcessingComplete }) => {
         </div>
       )}
 
-      {validationResults.map((validation, index) => (
-        <div key={validation.timestamp || index} className={`validation-result ${validation.valid ? 'valid' : 'invalid'}`}>
-          <div className="validation-header">
+      {validationResults.map((validation, index) => {
+        const isExpanded = expandedValidations.has(validation.step);
+        const isCollapsible = !validation.valid;
+        const validationKey = validation.timestamp || index;
+        
+        return (
+        <div key={validationKey} className={`validation-result ${validation.valid ? 'valid' : 'invalid'}`}>
+          <div 
+            className="validation-header" 
+            onClick={isCollapsible ? () => toggleValidation(validation.step) : undefined}
+            style={isCollapsible ? { cursor: 'pointer' } : {}}
+          >
+            {isCollapsible && (
+              <span className="validation-chevron" style={{ marginRight: '8px' }}>
+                {isExpanded ? '▼' : '▶'}
+              </span>
+            )}
             <span className="validation-icon">
               {validation.valid ? '✓' : '✗'}
             </span>
@@ -534,7 +583,8 @@ const FileUpload = ({ onProcessingComplete }) => {
             {!validation.valid && validation.download_file && (
               <button 
                 className="download-report-btn"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   const link = document.createElement('a');
                   link.href = `http://localhost:5001/api/download/${validation.download_file}`;
                   link.download = validation.download_file;
@@ -551,6 +601,7 @@ const FileUpload = ({ onProcessingComplete }) => {
               <span className="user-input-required">❓</span>
             )}
           </div>
+          {(!isCollapsible || isExpanded) && (
           <div className="validation-details">
             {validation.step === 'column_validation' ? (
               <>
@@ -705,8 +756,16 @@ const FileUpload = ({ onProcessingComplete }) => {
               </>
             )}
           </div>
+          )}
         </div>
-      ))}
+        );
+      })}
+
+      {validationResults.length > 0 && validationResults.some(v => !v.valid) && (
+        <div className="validation-error-message" style={{marginTop: '20px', padding: '15px', backgroundColor: '#fff3cd', border: '1px solid #ffc107', borderRadius: '4px', textAlign: 'center'}}>
+          <p style={{margin: 0, fontWeight: 'bold', color: '#856404'}}>Please fix validation errors in order to continue with mapping process</p>
+        </div>
+      )}
 
       {error && (
         <div className="error-message">
