@@ -103,7 +103,14 @@ def process_migration_api():
             proceed_without_missing_records
         )
         
-        # Check if validation failed
+        # Check if validation failed (new format: all validations returned together)
+        if 'error' in result and result.get('error') == 'Validation failures detected':
+            # Clean up uploaded files
+            os.remove(subscriber_path)
+            os.remove(mapping_path)
+            return jsonify(result)
+        
+        # Check if validation failed (old format: single validation failure)
         if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation', 'date_format_validation', 'date_validation', 'ca_postal_code_validation', 'us_postal_code_validation', 'missing_postal_code_validation']:
             # Clean up uploaded files
             os.remove(subscriber_path)

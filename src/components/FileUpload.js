@@ -123,7 +123,26 @@ const FileUpload = ({ onProcessingComplete }) => {
         return;
       }
       
-      // Check if validation failed
+      // Check if validation failed (new format: all validations returned together)
+      if (result.error === 'Validation failures detected' && result.validation_results) {
+        // Display all validation results (both passed and failed)
+        const allValidations = result.validation_results.map(validation => ({
+          ...validation,
+          timestamp: Date.now()
+        }));
+        setValidationResults(allValidations);
+        setIsProcessing(false);
+        setProcessingStatus('');
+        setCurrentValidationStep('');
+        
+        // Scroll to bottom to show validation results
+        setTimeout(() => {
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        }, 100);
+        return;
+      }
+      
+      // Check if validation failed (old format: single validation failure)
       if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation' || result.step === 'date_format_validation' || result.step === 'date_validation' || result.step === 'ca_postal_code_validation' || result.step === 'us_postal_code_validation' || result.step === 'missing_postal_code_validation')) {
         // Add any previous successful validations first
         if (result.validation_results) {
@@ -506,7 +525,7 @@ const FileUpload = ({ onProcessingComplete }) => {
                 : validation.step === 'us_postal_code_validation'
                 ? (validation.valid ? 'US postal code validation passed' : 'US postal code validation failed')
                 : validation.step === 'missing_postal_code_validation'
-                ? (validation.valid ? 'Missing postal code validation passed' : 'Missing postal code validation failed')
+                ? (validation.valid ? 'Missing postal code validation passed   🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸' : 'Missing postal code validation failed   🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸')
                 : validation.step === 'duplicate_detection'
                 ? 'Duplicate detection requires input'
                 : (validation.valid ? `${validation.step} passed` : `${validation.step} failed`)
@@ -555,7 +574,7 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <>
-                    <p>Date formats must be in ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-07-06T00:00:00Z).</p>
+                    <p>current_period_started_at and current_period_ends_at dates must be in ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-07-06T00:00:00Z).</p>
                     <div className="missing-columns">
                       <p><strong>Found {validation.incorrect_count} records with incorrect date formats.</strong></p>
                       <p>Click the download icon to get a report of all incorrect records.</p>
@@ -567,7 +586,7 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <>
-                    <p>Date periods must be logical: start dates should not be in the future, end dates should not be in the past.</p>
+                    <p>Date periods must be logical: current_period_started_at dates should not be in the future, current_period_ends_at dates should not be in the past.</p>
                     <div className="missing-columns">
                       <p><strong>Found {validation.incorrect_count} records with invalid date periods.</strong></p>
                       <p>Click the download icon to get a report of all incorrect records.</p>
@@ -614,14 +633,7 @@ const FileUpload = ({ onProcessingComplete }) => {
                     {validation.autocorrectable_count > 0 && (
                       <div className="user-input-options">
                         <p><strong>Please choose how to proceed:</strong></p>
-                        <div className="user-input-buttons">
-                          <button 
-                            onClick={() => handleUserInput(validation.step, 'cancel')}
-                            className="user-input-btn"
-                            disabled={isProcessing}
-                          >
-                            Cancel
-                          </button>
+                        <div className="user-input-buttons" style={{justifyContent: 'center'}}>
                           <button 
                             onClick={() => handleUserInput(validation.step, 'autocorrect_leading_zeros')}
                             className="user-input-btn"
@@ -647,32 +659,16 @@ const FileUpload = ({ onProcessingComplete }) => {
                       )}
                       <p>Click the download icon to get a report of all missing records.</p>
                     </div>
-                    {validation.show_buttons !== false && (
+                    {validation.available_from_mapping > 0 && (
                       <div className="user-input-options">
                         <p><strong>Please choose how to proceed:</strong></p>
                         <div className="user-input-buttons">
                           <button 
-                            onClick={() => handleUserInput(validation.step, 'cancel')}
+                            onClick={() => handleUserInput(validation.step, 'use_mapping_postal_codes')}
                             className="user-input-btn"
                             disabled={isProcessing}
                           >
-                            Cancel
-                          </button>
-                          {validation.available_from_mapping > 0 && (
-                            <button 
-                              onClick={() => handleUserInput(validation.step, 'use_mapping_postal_codes')}
-                              className="user-input-btn"
-                              disabled={isProcessing}
-                            >
-                              Use mapping postal codes
-                            </button>
-                          )}
-                          <button 
-                            onClick={() => handleUserInput(validation.step, 'proceed_without_missing_records')}
-                            className="user-input-btn"
-                            disabled={isProcessing}
-                          >
-                            Proceed without missing records
+                            Use mapping postal codes
                           </button>
                         </div>
                       </div>
