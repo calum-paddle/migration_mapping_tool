@@ -631,9 +631,8 @@ const FileUpload = ({ onProcessingComplete }) => {
                       <p>Click the download icon to get a report of all incorrect records.</p>
                     </div>
                     {validation.autocorrectable_count > 0 && (
-                      <div className="user-input-options">
-                        <p><strong>Please choose how to proceed:</strong></p>
-                        <div className="user-input-buttons" style={{justifyContent: 'center'}}>
+                      <div className="user-input-options" style={{paddingTop: 0}}>
+                        <div className="user-input-buttons" style={{justifyContent: 'center', alignItems: 'center'}}>
                           <button 
                             onClick={() => handleUserInput(validation.step, 'autocorrect_leading_zeros')}
                             className="user-input-btn"
@@ -660,15 +659,14 @@ const FileUpload = ({ onProcessingComplete }) => {
                       <p>Click the download icon to get a report of all missing records.</p>
                     </div>
                     {validation.available_from_mapping > 0 && (
-                      <div className="user-input-options">
-                        <p><strong>Please choose how to proceed:</strong></p>
-                        <div className="user-input-buttons">
+                      <div className="user-input-options" style={{paddingTop: 0}}>
+                        <div className="user-input-buttons" style={{justifyContent: 'center', alignItems: 'center'}}>
                           <button 
                             onClick={() => handleUserInput(validation.step, 'use_mapping_postal_codes')}
                             className="user-input-btn"
                             disabled={isProcessing}
                           >
-                            Use mapping postal codes
+                            Use Mapping File Postal Codes
                           </button>
                         </div>
                       </div>

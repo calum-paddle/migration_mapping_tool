@@ -900,6 +900,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         })
         
         # Select necessary columns for the merge
+        # Include 'Zip Code' column if it exists in mapping data (needed for postal code validation)
         columns_to_keep = [
             'card_token',  # This is used for the merge
             'original_credit_card_number',  # Preserve the original credit card number
@@ -908,6 +909,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             'card_expiry_year',
             'network_transaction_id'
         ]
+        # Add 'Zip Code' if it exists in the mapping data
+        if 'Zip Code' in mappingdata.columns:
+            columns_to_keep.append('Zip Code')
         filtered_mappingdata = mappingdata[columns_to_keep]
         
         # Ensure `card_token` columns in both DataFrames are of the same type (string)
