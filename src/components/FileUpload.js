@@ -16,6 +16,7 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [currentValidationStep, setCurrentValidationStep] = useState('');
   const [waitingForUserInput, setWaitingForUserInput] = useState(false);
   const [expandedValidations, setExpandedValidations] = useState(new Set());
+  const [zipFile, setZipFile] = useState(null);
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -152,6 +153,15 @@ const FileUpload = ({ onProcessingComplete }) => {
           timestamp: Date.now()
         }));
         setValidationResults(allValidations);
+        // Store zip file if available (check both zip_file and output_files)
+        if (result.zip_file) {
+          setZipFile(result.zip_file);
+        } else if (result.output_files) {
+          const zipFileInfo = result.output_files.find(f => f.is_zip);
+          if (zipFileInfo) {
+            setZipFile(zipFileInfo);
+          }
+        }
         // Initialize expanded state: expand passed validations (but not warnings), collapse failed ones and warnings
         const initialExpanded = new Set(
           allValidations.filter(v => v.valid && v.type !== 'warning').map(v => v.step)
@@ -208,6 +218,13 @@ const FileUpload = ({ onProcessingComplete }) => {
           timestamp: Date.now()
         }));
         setValidationResults(prev => [...prev, ...newValidations]);
+        // Store zip file if available
+        if (result.output_files) {
+          const zipFileInfo = result.output_files.find(f => f.is_zip);
+          if (zipFileInfo) {
+            setZipFile(zipFileInfo);
+          }
+        }
         // Expand passed validations (but not warnings)
         newValidations.filter(v => v.valid && v.type !== 'warning').forEach(v => {
           setExpandedValidations(prev => new Set([...prev, v.step]));
@@ -235,6 +252,7 @@ const FileUpload = ({ onProcessingComplete }) => {
     setProcessingStatus('');
     setCurrentValidationStep('');
     setWaitingForUserInput(false);
+    setZipFile(null);
   };
 
   const handleUserInput = async (step, userChoice) => {
@@ -546,8 +564,9 @@ const FileUpload = ({ onProcessingComplete }) => {
         const isCollapsible = !validation.valid || isWarning; // Failed validations and warnings are collapsible
         const validationKey = validation.timestamp || index;
         
+        const isSuccessfullyMapped = validation.step === 'successfully_mapped_records';
         return (
-        <div key={validationKey} className={`validation-result ${isWarning ? 'warning' : (validation.valid ? 'valid' : 'invalid')}`}>
+        <div key={validationKey} className={`validation-result ${isSuccessfullyMapped ? 'super-success' : (isWarning ? 'warning' : (validation.valid ? 'valid' : 'invalid'))}`}>
           <div 
             className="validation-header" 
             onClick={isCollapsible ? () => toggleValidation(validation.step) : undefined}
@@ -563,19 +582,19 @@ const FileUpload = ({ onProcessingComplete }) => {
             </span>
             <span className="validation-title">
               {validation.step === 'column_validation' 
-                ? (validation.valid ? 'Column validation passed' : 'Column validation failed')
+                ? (validation.valid ? 'Column validation passed' : `Column validation failed${validation.missing_columns ? ` (${validation.missing_columns.length})` : ''}`)
                 : validation.step === 'date_format_validation'
-                ? (validation.valid ? 'Date format validation passed' : 'Date format validation failed')
+                ? (validation.valid ? 'Date format validation passed' : `Date format validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'date_validation'
-                ? (validation.valid ? 'Date validation passed' : 'Date validation failed')
+                ? (validation.valid ? 'Date validation passed' : `Date validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'card_token_validation'
-                ? (validation.valid ? 'Card token validation passed' : 'Card token validation failed')
+                ? (validation.valid ? 'Card token validation passed' : `Card token validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'ca_postal_code_validation'
-                ? (validation.valid ? 'Canadian postal code validation passed' : 'Canadian postal code validation failed')
+                ? (validation.valid ? 'Canadian postal code validation passed' : `Canadian postal code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'us_postal_code_validation'
-                ? (validation.valid ? 'US postal code validation passed' : 'US postal code validation failed')
+                ? (validation.valid ? 'US postal code validation passed' : `US postal code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'missing_postal_code_validation'
-                ? (validation.valid ? 'Missing postal code validation passed   🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸' : 'Missing postal code validation failed   🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸')
+                ? (validation.valid ? 'Missing postal code validation passed   🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸' : `Missing postal code validation failed   🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸${validation.missing_count !== undefined ? ` (${validation.missing_count})` : ''}`)
                 : validation.step === 'duplicate_tokens'
                 ? `Duplicate card tokens detected (${validation.count})`
                 : validation.step === 'duplicate_external_subscription_ids'
@@ -584,12 +603,16 @@ const FileUpload = ({ onProcessingComplete }) => {
                 ? `Duplicate customer emails detected (${validation.count})`
                 : validation.step === 'duplicate_card_ids'
                 ? `Duplicate card IDs detected (${validation.count})`
+                : validation.step === 'no_token_found'
+                ? `No token found (${validation.count})`
+                : validation.step === 'successfully_mapped_records'
+                ? `Successfully mapped records (${validation.count})`
                 : validation.step === 'duplicate_detection'
                 ? 'Duplicate detection requires input'
                 : (validation.valid ? `${validation.step} passed` : `${validation.step} failed`)
               }
             </span>
-            {(isWarning || !validation.valid) && validation.download_file && (
+            {validation.download_file && (
               <button 
                 className="download-report-btn"
                 onClick={(e) => {
@@ -601,7 +624,7 @@ const FileUpload = ({ onProcessingComplete }) => {
                   link.click();
                   document.body.removeChild(link);
                 }}
-                title={isWarning ? "Download duplicate records report" : "Download incorrect records report"}
+                title={isWarning ? "Download duplicate records report" : validation.valid && validation.step === 'successfully_mapped_records' ? "Download final import file" : "Download incorrect records report"}
               >
                 📥
               </button>
@@ -764,6 +787,24 @@ const FileUpload = ({ onProcessingComplete }) => {
                   </div>
                 )}
               </>
+            ) : validation.step === 'no_token_found' ? (
+              <>
+                <p>{validation.message}</p>
+                {validation.download_file && (
+                  <div className="missing-columns">
+                    <p>Click the download icon to get a report of all records with no matching token.</p>
+                  </div>
+                )}
+              </>
+            ) : validation.step === 'successfully_mapped_records' ? (
+              <>
+                <p>{validation.message}</p>
+                {validation.download_file && (
+                  <div className="missing-columns">
+                    <p>Click the download icon to get the final import file with all successfully mapped records.</p>
+                  </div>
+                )}
+              </>
             ) : (
               <>
                 {validation.valid ? (
@@ -779,9 +820,23 @@ const FileUpload = ({ onProcessingComplete }) => {
         );
       })}
 
-      {validationResults.length > 0 && validationResults.some(v => !v.valid) && (
-        <div className="validation-error-message" style={{marginTop: '20px', padding: '15px', backgroundColor: '#fff3cd', border: '1px solid #ffc107', borderRadius: '4px', textAlign: 'center'}}>
-          <p style={{margin: 0, fontWeight: 'bold', color: '#856404'}}>Please fix validation errors in order to continue with mapping process</p>
+
+      {validationResults.length > 0 && zipFile && (
+        <div style={{marginTop: '20px', textAlign: 'center'}}>
+          <button
+            onClick={() => {
+              const link = document.createElement('a');
+              link.href = `http://localhost:5001/api/download/${zipFile.name}`;
+              link.download = zipFile.name;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+            }}
+            className="submit-btn"
+            style={{padding: '12px 24px', fontSize: '16px'}}
+          >
+            📦 Download All Reports
+          </button>
         </div>
       )}
 

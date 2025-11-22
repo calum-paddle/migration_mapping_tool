@@ -471,6 +471,53 @@ input:checked + .slider:before {
   padding: 0.5rem;
 }
 
+.validation-result.super-success {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: 3px solid #047857;
+  padding: 1rem;
+  box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.3), 0 2px 4px -1px rgba(16, 185, 129, 0.2);
+  font-weight: 600;
+}
+
+.validation-result.super-success .validation-header {
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin-bottom: 0.5rem;
+}
+
+.validation-result.super-success .validation-icon {
+  font-size: 24px;
+  color: #ffffff;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.2));
+}
+
+.validation-result.super-success .validation-title {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.validation-result.super-success .validation-details {
+  color: #ffffff;
+  opacity: 0.95;
+}
+
+.validation-result.super-success .validation-details p {
+  color: #ffffff;
+}
+
+.validation-result.super-success .download-report-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  color: #ffffff;
+}
+
+.validation-result.super-success .download-report-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.7);
+}
+
 .validation-result.invalid {
   background: #fef2f2;
   color: #dc2626;

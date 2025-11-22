@@ -656,6 +656,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                   keep_default_na=False, na_values=['_'])
         subscriber_filename = os.path.basename(subscriber_file)
     
+    # Add temporary unique row ID to track records through merge and validations
+    subscribedata['_temp_row_id'] = range(len(subscribedata))
+    
     if hasattr(mapping_file, 'read'):
         # File object from React
         mappingdata = pd.read_csv(mapping_file, encoding='latin-1')
@@ -671,6 +674,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     # Initialize validation results list
     validation_results = []
+    
+    # Initialize set to collect all failed _temp_row_id values
+    failed_row_ids = set()
     
     if not validation_result['valid']:
         print(f"Column validation failed. Missing columns: {validation_result['missing_columns']}")
@@ -801,6 +807,16 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 except Exception as e:
                     print(f"Error saving incorrect records file: {e}")
             
+            # Collect failed _temp_row_id values from incorrect records
+            if date_format_validation['incorrect_records'] is not None and '_temp_row_id' in date_format_validation['incorrect_records'].columns:
+                # Convert back from string to int (since validation functions convert all columns to strings)
+                temp_ids = date_format_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                # Convert to int, handling string values
+                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                failed_ids = [x for x in failed_ids if x is not None]
+                failed_row_ids.update(failed_ids)
+                print(f"Collected {len(failed_ids)} failed row IDs from date format validation: {failed_ids[:10]}")
+            
             # Add failed validation to results but continue processing
             validation_results.append({
                 'valid': False,
@@ -856,6 +872,15 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     print(f"Saved incorrect records to: {incorrect_path}")
                 except Exception as e:
                     print(f"Error saving incorrect records file: {e}")
+            
+            # Collect failed _temp_row_id values from incorrect records
+            if date_validation['incorrect_records'] is not None and '_temp_row_id' in date_validation['incorrect_records'].columns:
+                # Convert back from string to int (since validation functions convert all columns to strings)
+                temp_ids = date_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                failed_ids = [x for x in failed_ids if x is not None]
+                failed_row_ids.update(failed_ids)
+                print(f"Collected {len(failed_ids)} failed row IDs from date period validation: {failed_ids[:10]}")
             
             # Add failed validation to results but continue processing
             validation_results.append({
@@ -1125,6 +1150,15 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                 except Exception as e:
                                     print(f"Error saving missing records file: {e}")
                             
+                            # Collect failed _temp_row_id values from missing records (after mapping update)
+                            if missing_postal_validation['missing_records'] is not None and '_temp_row_id' in missing_postal_validation['missing_records'].columns:
+                                # Convert back from string to int (since validation functions convert all columns to strings)
+                                temp_ids = missing_postal_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                                failed_ids = [x for x in failed_ids if x is not None]
+                                failed_row_ids.update(failed_ids)
+                                print(f"Collected {len(failed_ids)} failed row IDs from missing postal code validation (after mapping update): {failed_ids[:10]}")
+                            
                             validation_results.append({
                                 'valid': False,
                                 'step': 'missing_postal_code_validation',
@@ -1194,6 +1228,15 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                         except Exception as e:
                             print(f"Error saving missing records file: {e}")
                     
+                    # Collect failed _temp_row_id values from missing records
+                    if missing_postal_validation['missing_records'] is not None and '_temp_row_id' in missing_postal_validation['missing_records'].columns:
+                        # Convert back from string to int (since validation functions convert all columns to strings)
+                        temp_ids = missing_postal_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                        failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                        failed_ids = [x for x in failed_ids if x is not None]
+                        failed_row_ids.update(failed_ids)
+                        print(f"Collected {len(failed_ids)} failed row IDs from missing postal code validation: {failed_ids[:10]}")
+                    
                     validation_results.append({
                         'valid': False,
                         'step': 'missing_postal_code_validation',
@@ -1222,6 +1265,15 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     print(f"Saved missing records to: {missing_path}")
                 except Exception as e:
                     print(f"Error saving missing records file: {e}")
+            
+            # Collect failed _temp_row_id values from missing records
+            if missing_postal_validation['missing_records'] is not None and '_temp_row_id' in missing_postal_validation['missing_records'].columns:
+                # Convert back from string to int (since validation functions convert all columns to strings)
+                temp_ids = missing_postal_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                failed_ids = [x for x in failed_ids if x is not None]
+                failed_row_ids.update(failed_ids)
+                print(f"Collected {len(failed_ids)} failed row IDs from missing postal code validation: {failed_ids[:10]}")
             
             # Add failed validation to results but continue processing
             validation_results.append({
@@ -1399,6 +1451,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         # Preserve is_duplicate_token flag if it exists (needed for duplicate detection)
         if 'is_duplicate_token' in completed.columns and 'is_duplicate_token' not in existing_columns:
             existing_columns.append('is_duplicate_token')
+        # Preserve _temp_row_id if it exists (needed for tracking failed records)
+        if '_temp_row_id' in completed.columns and '_temp_row_id' not in existing_columns:
+            existing_columns.append('_temp_row_id')
         completed = completed[existing_columns]
         
     else:  # Bluesnap
@@ -1412,12 +1467,22 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         # Preserve is_duplicate_token flag if it exists (needed for duplicate detection)
         if 'is_duplicate_token' in completed.columns and 'is_duplicate_token' not in existing_columns:
             existing_columns.append('is_duplicate_token')
+        # Preserve _temp_row_id if it exists (needed for tracking failed records)
+        if '_temp_row_id' in completed.columns and '_temp_row_id' not in existing_columns:
+            existing_columns.append('_temp_row_id')
         completed = completed[existing_columns]
     
     print("Filtering rows with customer_email...")
     print(f"Rows before email filtering: {len(completed)}")
     completed = completed[completed['customer_email'].notna()]
     print(f"Rows after email filtering: {len(completed)}")
+    
+    # Detect duplicate emails BEFORE anonymization (so we can catch real duplicates)
+    # Store this for later use - we'll use this directly for reporting
+    duplicate_emails_before_anonymization = completed[completed.duplicated(subset='customer_email', keep=False)].copy()
+    print(f"Duplicate emails detected (before anonymization): {len(duplicate_emails_before_anonymization)}")
+    if len(duplicate_emails_before_anonymization) > 0:
+        print(f"Duplicate email values: {duplicate_emails_before_anonymization['customer_email'].value_counts().to_dict()}")
     
     # Sandbox-specific data anonymization
     if is_sandbox:
@@ -1482,6 +1547,15 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     print(f"Saved incorrect records to: {incorrect_path}")
                 except Exception as e:
                     print(f"Error saving incorrect records file: {e}")
+            
+            # Collect failed _temp_row_id values from incorrect records
+            if ca_postal_validation['incorrect_records'] is not None and '_temp_row_id' in ca_postal_validation['incorrect_records'].columns:
+                # Convert back from string to int (since validation functions convert all columns to strings)
+                temp_ids = ca_postal_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                failed_ids = [x for x in failed_ids if x is not None]
+                failed_row_ids.update(failed_ids)
+                print(f"Collected {len(failed_ids)} failed row IDs from CA postal code validation: {failed_ids[:10]}")
             
             # Add failed validation to results but continue processing
             validation_results.append({
@@ -1573,6 +1647,15 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 # Still have invalid codes (either no autocorrect or autocorrect didn't fix everything)
                 if us_postal_validation:
                     print(f"US postal code validation failed. Found {us_postal_validation['incorrect_count']} incorrect formats.")
+                    # Collect failed _temp_row_id values from incorrect records
+                    if us_postal_validation['incorrect_records'] is not None and '_temp_row_id' in us_postal_validation['incorrect_records'].columns:
+                        # Convert back from string to int (since validation functions convert all columns to strings)
+                        temp_ids = us_postal_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                        failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                        failed_ids = [x for x in failed_ids if x is not None]
+                        failed_row_ids.update(failed_ids)
+                        print(f"Collected {len(failed_ids)} failed row IDs from US postal code validation: {failed_ids[:10]}")
+                
                 # Add failed validation to results but continue processing
                 validation_results.append({
                     'valid': False,
@@ -1594,40 +1677,105 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     print("Starting duplicate detection...")
     
+    # Detect ALL duplicates BEFORE removing failed records (so we catch all duplicates even if some are removed)
+    
     # Find all rows where card_token appears more than once
     # For both Bluesnap and Stripe: use the flag set before card_token was replaced/renamed
     # This checks duplicates based on the original merge key, not the final card_token value
     if 'is_duplicate_token' in completed.columns:
-        duplicate_tokens = completed[completed['is_duplicate_token'] == True]
-        # Drop the flag column from both completed and duplicate_tokens as it's only used for duplicate detection
-        if 'is_duplicate_token' in duplicate_tokens.columns:
-            duplicate_tokens = duplicate_tokens.drop(columns=['is_duplicate_token'])
-        completed = completed.drop(columns=['is_duplicate_token'])
+        duplicate_tokens_before_removal = completed[completed['is_duplicate_token'] == True].copy()
+        # Drop the flag column from duplicate_tokens but keep it in completed for now
+        if 'is_duplicate_token' in duplicate_tokens_before_removal.columns:
+            duplicate_tokens_before_removal = duplicate_tokens_before_removal.drop(columns=['is_duplicate_token'])
     else:
         # Fallback: check duplicates in card_token (shouldn't happen with current logic)
-        duplicate_tokens = completed[completed['card_token'].notna() & completed.duplicated(subset='card_token', keep=False)]
-    print(f"Duplicate tokens records: {len(duplicate_tokens)}")
+        duplicate_tokens_before_removal = completed[completed['card_token'].notna() & completed.duplicated(subset='card_token', keep=False)].copy()
+    print(f"Duplicate tokens records (before removal): {len(duplicate_tokens_before_removal)}")
     
-    # Duplicate detection (same for both environments)
-    success = completed[completed['card_token'].notna()]
-    print(f"Success records: {len(success)}")
+    # Find all rows where card_id appears more than once (only for Stripe) - BEFORE removal
+    duplicate_card_ids_before_removal = pd.DataFrame()
+    if provider.lower() == 'stripe' and 'card_id' in completed.columns:
+        duplicate_card_ids_before_removal = completed[completed['card_id'].notna() & completed.duplicated(subset='card_id', keep=False)].copy()
+        print(f"Duplicate card IDs records (before removal): {len(duplicate_card_ids_before_removal)}")
     
+    # Find all rows where subscription_external_id appears more than once - BEFORE removal
+    duplicate_external_subscription_ids_before_removal = completed[completed.duplicated(subset='subscription_external_id', keep=False)].copy()
+    print(f"Duplicate external subscription IDs records (before removal): {len(duplicate_external_subscription_ids_before_removal)}")
+    
+    # Identify no_tokens before removal (for reporting)
     no_tokens = completed[completed['card_token'].isnull()]
     print(f"No tokens records: {len(no_tokens)}")
     
-    # Find all rows where card_id appears more than once (only for Stripe)
-    duplicate_card_ids = pd.DataFrame()
-    if provider.lower() == 'stripe' and 'card_id' in completed.columns:
-        duplicate_card_ids = completed[completed['card_id'].notna() & completed.duplicated(subset='card_id', keep=False)]
-        print(f"Duplicate card IDs records: {len(duplicate_card_ids)}")
+    # Drop is_duplicate_token flag from completed now that we've saved duplicates
+    if 'is_duplicate_token' in completed.columns:
+        completed = completed.drop(columns=['is_duplicate_token'])
     
-    # Find all rows where subscription_external_id appears more than once
-    duplicate_external_subscription_ids = completed[completed.duplicated(subset='subscription_external_id', keep=False)]
-    print(f"Duplicate external subscription IDs records: {len(duplicate_external_subscription_ids)}")
+    # Collect failed _temp_row_id values from no_tokens
+    if len(no_tokens) > 0 and '_temp_row_id' in no_tokens.columns:
+        # Ensure _temp_row_id is numeric
+        temp_ids = pd.to_numeric(no_tokens['_temp_row_id'], errors='coerce').dropna()
+        failed_ids = [int(x) for x in temp_ids if pd.notna(x)]
+        failed_row_ids.update(failed_ids)
+        print(f"Collected {len(failed_ids)} failed row IDs from no_tokens: {failed_ids[:10]}")
     
-    # Find all rows where customer_email appears more than once
-    duplicate_emails = completed[completed.duplicated(subset='customer_email', keep=False)]
-    print(f"Duplicate emails records: {len(duplicate_emails)}")
+    # Remove all failed records from completed (records that failed any validation or have no token)
+    if len(failed_row_ids) > 0:
+        print(f"Removing {len(failed_row_ids)} records that failed validation or have no token...")
+        print(f"Failed row IDs to remove: {sorted(list(failed_row_ids))[:20]}...")  # Show first 20
+        if '_temp_row_id' in completed.columns:
+            print(f"Total records in completed before removal: {len(completed)}")
+            print(f"_temp_row_id column type: {completed['_temp_row_id'].dtype}")
+            print(f"Sample _temp_row_id values: {completed['_temp_row_id'].head(10).tolist()}")
+            # Ensure _temp_row_id is numeric for comparison
+            if completed['_temp_row_id'].dtype == 'object':
+                # Convert from string if needed
+                completed['_temp_row_id'] = pd.to_numeric(completed['_temp_row_id'], errors='coerce')
+            completed = completed[~completed['_temp_row_id'].isin(failed_row_ids)]
+            print(f"Remaining records after removal: {len(completed)}")
+        else:
+            print("ERROR: _temp_row_id column not found in completed DataFrame, cannot remove failed records")
+            print(f"Available columns: {completed.columns.tolist()}")
+    
+    # Recalculate success after removing failed records
+    # Successfully mapped records are those that remain in completed and have a card_token
+    success = completed[completed['card_token'].notna()].copy()
+    print(f"Successfully mapped records: {len(success)}")
+    
+    # Remove _temp_row_id from success before saving (it's only for tracking)
+    if '_temp_row_id' in success.columns:
+        success = success.drop(columns=['_temp_row_id'])
+    
+    # Use the duplicate detections from before removal for reporting
+    # This ensures we show all duplicates even if some records were removed due to validation failures
+    duplicate_tokens = duplicate_tokens_before_removal
+    duplicate_card_ids = duplicate_card_ids_before_removal
+    duplicate_external_subscription_ids = duplicate_external_subscription_ids_before_removal
+    print(f"Using duplicate detections from before removal for reporting")
+    
+    # Use duplicate emails detected before anonymization
+    # We use the pre-anonymization detection because:
+    # 1. In sandbox, emails are anonymized so we can't detect duplicates after
+    # 2. In production, we want to show duplicates even if some records were removed due to validation failures
+    # Map the duplicate_emails_before_anonymization to current records using _temp_row_id
+    if len(duplicate_emails_before_anonymization) > 0 and '_temp_row_id' in duplicate_emails_before_anonymization.columns and '_temp_row_id' in completed.columns:
+        # Find records in completed that match the _temp_row_id from duplicate_emails_before_anonymization
+        # This gives us the duplicate records that are still in completed (not removed by validation)
+        duplicate_emails = completed[completed['_temp_row_id'].isin(duplicate_emails_before_anonymization['_temp_row_id'])]
+        print(f"Duplicate emails records (mapped to current records): {len(duplicate_emails)}")
+    else:
+        # Fallback: try to detect again (only works in production, not sandbox)
+        if not is_sandbox:
+            duplicate_emails = completed[completed.duplicated(subset='customer_email', keep=False)]
+            print(f"Duplicate emails records (detected after validation): {len(duplicate_emails)}")
+        else:
+            # In sandbox, if we can't map, create empty DataFrame
+            duplicate_emails = pd.DataFrame()
+            print(f"Duplicate emails records: 0 (could not map pre-anonymization duplicates)")
+    
+    # For reporting purposes, we want to show ALL duplicates that were detected before anonymization
+    # even if some were removed due to validation failures
+    # So we'll use duplicate_emails_before_anonymization for the report file
+    duplicate_emails_for_report = duplicate_emails_before_anonymization.copy()
     
     # Generate output filenames
     if seller_name:
@@ -1649,12 +1797,14 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     os.makedirs(output_dir, exist_ok=True)
     
     # Save files and collect information
+    # Use all duplicate detections from BEFORE removal/anonymization for reporting
+    # This ensures we show all duplicates even if some records were removed due to validation failures
     files_to_save = [
         (success, f'{base_filename}_final_import.csv'),
         (no_tokens, f'{base_filename}_no_token_found.csv'),
-        (duplicate_tokens, f'{base_filename}_duplicate_tokens.csv'),
-        (duplicate_external_subscription_ids, f'{base_filename}_duplicate_external_subscription_ids.csv'),
-        (duplicate_emails, f'{base_filename}_duplicate_emails.csv')
+        (duplicate_tokens_before_removal, f'{base_filename}_duplicate_tokens.csv'),
+        (duplicate_external_subscription_ids_before_removal, f'{base_filename}_duplicate_external_subscription_ids.csv'),
+        (duplicate_emails_for_report, f'{base_filename}_duplicate_emails.csv')
     ]
     
     # Add duplicate card IDs file only for Stripe
@@ -1687,18 +1837,34 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         else:
             print(f"Skipping empty dataframe for: {filename}")
     
-    # Create zip file with all reports
-    if output_files:  # Only create zip if there are files to include
+    # Collect all files from validation_results to include in zip
+    validation_files_to_zip = []
+    for validation in validation_results:
+        if 'download_file' in validation and validation['download_file']:
+            validation_files_to_zip.append(validation['download_file'])
+    
+    # Create zip file with all reports (always create if there are any files)
+    all_files_to_zip = output_files + [{'name': f} for f in validation_files_to_zip if f not in [of['name'] for of in output_files]]
+    
+    if all_files_to_zip:  # Create zip if there are any files to include
         zip_filename = f'{base_filename}_all_reports.zip'
         zip_path = os.path.join(output_dir, zip_filename)
         
         try:
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                # Add files from output_files
                 for file_info in output_files:
                     file_path = os.path.join(output_dir, file_info['name'])
                     if os.path.exists(file_path):
                         zipf.write(file_path, file_info['name'])
                         print(f"Added {file_info['name']} to zip file")
+                
+                # Add files from validation_results
+                for filename in validation_files_to_zip:
+                    file_path = os.path.join(output_dir, filename)
+                    if os.path.exists(file_path) and filename not in [of['name'] for of in output_files]:
+                        zipf.write(file_path, filename)
+                        print(f"Added {filename} to zip file")
             
             zip_size = os.path.getsize(zip_path)
             print(f"Zip file created successfully: {zip_path} (Size: {zip_size} bytes)")
@@ -1716,48 +1882,74 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     # Add duplicate detection results to validation_results (as warnings)
     # These should be shown even if validation errors occur
-    if len(duplicate_tokens) > 0:
+    # Use the before_removal versions to show all duplicates detected
+    if len(duplicate_tokens_before_removal) > 0:
         duplicate_tokens_filename = f'{base_filename}_duplicate_tokens.csv'
         validation_results.append({
             'valid': True,  # Not a failure, just a warning
             'step': 'duplicate_tokens',
             'type': 'warning',
-            'count': len(duplicate_tokens),
+            'count': len(duplicate_tokens_before_removal),
             'download_file': duplicate_tokens_filename,
-            'message': f'Found {len(duplicate_tokens)} records with duplicate card tokens.'
+            'message': f'Found {len(duplicate_tokens_before_removal)} records with duplicate card tokens.'
         })
     
-    if len(duplicate_external_subscription_ids) > 0:
+    if len(duplicate_external_subscription_ids_before_removal) > 0:
         duplicate_external_ids_filename = f'{base_filename}_duplicate_external_subscription_ids.csv'
         validation_results.append({
             'valid': True,
             'step': 'duplicate_external_subscription_ids',
             'type': 'warning',
-            'count': len(duplicate_external_subscription_ids),
+            'count': len(duplicate_external_subscription_ids_before_removal),
             'download_file': duplicate_external_ids_filename,
-            'message': f'Found {len(duplicate_external_subscription_ids)} records with duplicate external subscription IDs.'
+            'message': f'Found {len(duplicate_external_subscription_ids_before_removal)} records with duplicate external subscription IDs.'
         })
     
-    if len(duplicate_emails) > 0:
+    # Use duplicate_emails_for_report count for the validation result (shows all duplicates detected)
+    if len(duplicate_emails_for_report) > 0:
         duplicate_emails_filename = f'{base_filename}_duplicate_emails.csv'
         validation_results.append({
             'valid': True,
             'step': 'duplicate_emails',
             'type': 'warning',
-            'count': len(duplicate_emails),
+            'count': len(duplicate_emails_for_report),
             'download_file': duplicate_emails_filename,
-            'message': f'Found {len(duplicate_emails)} records with duplicate customer emails.'
+            'message': f'Found {len(duplicate_emails_for_report)} records with duplicate customer emails.'
         })
     
-    if provider.lower() == 'stripe' and len(duplicate_card_ids) > 0:
+    if provider.lower() == 'stripe' and len(duplicate_card_ids_before_removal) > 0:
         duplicate_card_ids_filename = f'{base_filename}_duplicate_card_ids.csv'
         validation_results.append({
             'valid': True,
             'step': 'duplicate_card_ids',
             'type': 'warning',
-            'count': len(duplicate_card_ids),
+            'count': len(duplicate_card_ids_before_removal),
             'download_file': duplicate_card_ids_filename,
-            'message': f'Found {len(duplicate_card_ids)} records with duplicate card IDs.'
+            'message': f'Found {len(duplicate_card_ids_before_removal)} records with duplicate card IDs.'
+        })
+    
+    # Add no_tokens as a validation box
+    if len(no_tokens) > 0:
+        no_tokens_filename = f'{base_filename}_no_token_found.csv'
+        validation_results.append({
+            'valid': False,
+            'step': 'no_token_found',
+            'type': 'error',
+            'count': len(no_tokens),
+            'download_file': no_tokens_filename,
+            'message': f'Found {len(no_tokens)} records with no matching token in mapping file.'
+        })
+    
+    # Add successfully mapped records as a validation box
+    if len(success) > 0:
+        success_filename = f'{base_filename}_final_import.csv'
+        validation_results.append({
+            'valid': True,
+            'step': 'successfully_mapped_records',
+            'type': 'success',
+            'count': len(success),
+            'download_file': success_filename,
+            'message': f'Successfully mapped {len(success)} records ready for import.'
         })
     
     processing_time = time.time() - start_time
@@ -1781,19 +1973,28 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     clean_validation[key] = validation[key]
             clean_validation_results.append(clean_validation)
         
+        # Find zip file in output_files if it exists
+        zip_file_info = None
+        for file_info in output_files:
+            if file_info.get('is_zip', False):
+                zip_file_info = file_info
+                break
+        
         return {
             'error': 'Validation failures detected',
             'validation_results': clean_validation_results,
-            'failed_count': len(failed_validations)
+            'failed_count': len(failed_validations),
+            'zip_file': zip_file_info,  # Include zip file info even when validations fail
+            'output_files': output_files  # Also include all output files for consistency
         }
     
     # Prepare results
     results = {
         'success_count': len(success),
         'no_tokens_count': len(no_tokens),
-        'duplicate_tokens_count': len(duplicate_tokens),
-        'duplicate_external_subscription_ids_count': len(duplicate_external_subscription_ids),
-        'duplicate_emails_count': len(duplicate_emails),
+        'duplicate_tokens_count': len(duplicate_tokens_before_removal),
+        'duplicate_external_subscription_ids_count': len(duplicate_external_subscription_ids_before_removal),
+        'duplicate_emails_count': len(duplicate_emails_for_report),
         'total_processed': len(completed),
         'processing_time': f"{processing_time:.2f} seconds",
         'output_files': output_files,
@@ -1803,7 +2004,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     # Add duplicate card IDs count only for Stripe
     if provider.lower() == 'stripe':
-        results['duplicate_card_ids_count'] = len(duplicate_card_ids)
+        results['duplicate_card_ids_count'] = len(duplicate_card_ids_before_removal)
     
     print('Success')
     return results
