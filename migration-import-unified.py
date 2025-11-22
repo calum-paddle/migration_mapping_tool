@@ -1714,6 +1714,52 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             print(f"Error creating zip file: {e}")
             # Continue without zip file if creation fails
     
+    # Add duplicate detection results to validation_results (as warnings)
+    # These should be shown even if validation errors occur
+    if len(duplicate_tokens) > 0:
+        duplicate_tokens_filename = f'{base_filename}_duplicate_tokens.csv'
+        validation_results.append({
+            'valid': True,  # Not a failure, just a warning
+            'step': 'duplicate_tokens',
+            'type': 'warning',
+            'count': len(duplicate_tokens),
+            'download_file': duplicate_tokens_filename,
+            'message': f'Found {len(duplicate_tokens)} records with duplicate card tokens.'
+        })
+    
+    if len(duplicate_external_subscription_ids) > 0:
+        duplicate_external_ids_filename = f'{base_filename}_duplicate_external_subscription_ids.csv'
+        validation_results.append({
+            'valid': True,
+            'step': 'duplicate_external_subscription_ids',
+            'type': 'warning',
+            'count': len(duplicate_external_subscription_ids),
+            'download_file': duplicate_external_ids_filename,
+            'message': f'Found {len(duplicate_external_subscription_ids)} records with duplicate external subscription IDs.'
+        })
+    
+    if len(duplicate_emails) > 0:
+        duplicate_emails_filename = f'{base_filename}_duplicate_emails.csv'
+        validation_results.append({
+            'valid': True,
+            'step': 'duplicate_emails',
+            'type': 'warning',
+            'count': len(duplicate_emails),
+            'download_file': duplicate_emails_filename,
+            'message': f'Found {len(duplicate_emails)} records with duplicate customer emails.'
+        })
+    
+    if provider.lower() == 'stripe' and len(duplicate_card_ids) > 0:
+        duplicate_card_ids_filename = f'{base_filename}_duplicate_card_ids.csv'
+        validation_results.append({
+            'valid': True,
+            'step': 'duplicate_card_ids',
+            'type': 'warning',
+            'count': len(duplicate_card_ids),
+            'download_file': duplicate_card_ids_filename,
+            'message': f'Found {len(duplicate_card_ids)} records with duplicate card IDs.'
+        })
+    
     processing_time = time.time() - start_time
     
     # Check if any validations failed - if so, stop and return all errors
@@ -1730,7 +1776,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             # Add all other fields that exist
             for key in ['missing_columns', 'total_columns', 'optional_columns', 'incorrect_count', 
                        'total_records', 'download_file', 'error', 'missing_count', 'available_from_mapping',
-                       'autocorrectable_count', 'autocorrected', 'autocorrected_count']:
+                       'autocorrectable_count', 'autocorrected', 'autocorrected_count', 'type', 'count', 'message']:
                 if key in validation:
                     clean_validation[key] = validation[key]
             clean_validation_results.append(clean_validation)

@@ -443,6 +443,27 @@ input:checked + .slider:before {
   border: 1px solid;
 }
 
+.validation-result.warning {
+  border: 2px solid #ffc107;
+  background-color: #fff3cd;
+  border-radius: 8px;
+  padding: 0.5rem;
+}
+
+.validation-result.warning .validation-header {
+  display: flex;
+  align-items: center;
+  font-weight: bold;
+  color: #856404;
+  margin-bottom: 0.125rem;
+}
+
+.validation-result.warning .validation-icon {
+  font-size: 20px;
+  margin-right: 10px;
+  color: #ffc107;
+}
+
 .validation-result.valid {
   background: #f0fdf4;
   color: #166534;
@@ -454,6 +475,11 @@ input:checked + .slider:before {
   background: #fef2f2;
   color: #dc2626;
   border-color: #fecaca;
+  padding: 0.5rem;
+}
+
+.validation-result.invalid .validation-header {
+  margin-bottom: 0.125rem;
 }
 
 .validation-header {

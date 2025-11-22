@@ -115,8 +115,8 @@ const FileUpload = ({ onProcessingComplete }) => {
             timestamp: Date.now()
           }));
           setValidationResults(prev => [...prev, ...previousValidations]);
-          // Expand passed validations
-          previousValidations.filter(v => v.valid).forEach(v => {
+          // Expand passed validations (but not warnings)
+          previousValidations.filter(v => v.valid && v.type !== 'warning').forEach(v => {
             setExpandedValidations(prev => new Set([...prev, v.step]));
           });
         }
@@ -128,8 +128,8 @@ const FileUpload = ({ onProcessingComplete }) => {
           timestamp: Date.now()
         };
         setValidationResults(prev => [...prev, newValidation]);
-        // Expand if it's a passed validation
-        if (newValidation.valid) {
+        // Expand if it's a passed validation (but not a warning)
+        if (newValidation.valid && newValidation.type !== 'warning') {
           setExpandedValidations(prev => new Set([...prev, newValidation.step]));
         }
         setWaitingForUserInput(true);
@@ -152,9 +152,9 @@ const FileUpload = ({ onProcessingComplete }) => {
           timestamp: Date.now()
         }));
         setValidationResults(allValidations);
-        // Initialize expanded state: expand passed validations, collapse failed ones
+        // Initialize expanded state: expand passed validations (but not warnings), collapse failed ones and warnings
         const initialExpanded = new Set(
-          allValidations.filter(v => v.valid).map(v => v.step)
+          allValidations.filter(v => v.valid && v.type !== 'warning').map(v => v.step)
         );
         setExpandedValidations(initialExpanded);
         setIsProcessing(false);
@@ -177,8 +177,8 @@ const FileUpload = ({ onProcessingComplete }) => {
             timestamp: Date.now()
           }));
           setValidationResults(prev => [...prev, ...previousValidations]);
-          // Expand passed validations
-          previousValidations.filter(v => v.valid).forEach(v => {
+          // Expand passed validations (but not warnings)
+          previousValidations.filter(v => v.valid && v.type !== 'warning').forEach(v => {
             setExpandedValidations(prev => new Set([...prev, v.step]));
           });
         }
@@ -208,8 +208,8 @@ const FileUpload = ({ onProcessingComplete }) => {
           timestamp: Date.now()
         }));
         setValidationResults(prev => [...prev, ...newValidations]);
-        // Expand passed validations
-        newValidations.filter(v => v.valid).forEach(v => {
+        // Expand passed validations (but not warnings)
+        newValidations.filter(v => v.valid && v.type !== 'warning').forEach(v => {
           setExpandedValidations(prev => new Set([...prev, v.step]));
         });
       }
@@ -542,11 +542,12 @@ const FileUpload = ({ onProcessingComplete }) => {
 
       {validationResults.map((validation, index) => {
         const isExpanded = expandedValidations.has(validation.step);
-        const isCollapsible = !validation.valid;
+        const isWarning = validation.type === 'warning';
+        const isCollapsible = !validation.valid || isWarning; // Failed validations and warnings are collapsible
         const validationKey = validation.timestamp || index;
         
         return (
-        <div key={validationKey} className={`validation-result ${validation.valid ? 'valid' : 'invalid'}`}>
+        <div key={validationKey} className={`validation-result ${isWarning ? 'warning' : (validation.valid ? 'valid' : 'invalid')}`}>
           <div 
             className="validation-header" 
             onClick={isCollapsible ? () => toggleValidation(validation.step) : undefined}
@@ -558,7 +559,7 @@ const FileUpload = ({ onProcessingComplete }) => {
               </span>
             )}
             <span className="validation-icon">
-              {validation.valid ? '✓' : '✗'}
+              {isWarning ? '⚠' : (validation.valid ? '✓' : '✗')}
             </span>
             <span className="validation-title">
               {validation.step === 'column_validation' 
@@ -575,12 +576,20 @@ const FileUpload = ({ onProcessingComplete }) => {
                 ? (validation.valid ? 'US postal code validation passed' : 'US postal code validation failed')
                 : validation.step === 'missing_postal_code_validation'
                 ? (validation.valid ? 'Missing postal code validation passed   🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸' : 'Missing postal code validation failed   🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸')
+                : validation.step === 'duplicate_tokens'
+                ? `Duplicate card tokens detected (${validation.count})`
+                : validation.step === 'duplicate_external_subscription_ids'
+                ? `Duplicate external subscription IDs detected (${validation.count})`
+                : validation.step === 'duplicate_emails'
+                ? `Duplicate customer emails detected (${validation.count})`
+                : validation.step === 'duplicate_card_ids'
+                ? `Duplicate card IDs detected (${validation.count})`
                 : validation.step === 'duplicate_detection'
                 ? 'Duplicate detection requires input'
                 : (validation.valid ? `${validation.step} passed` : `${validation.step} failed`)
               }
             </span>
-            {!validation.valid && validation.download_file && (
+            {(isWarning || !validation.valid) && validation.download_file && (
               <button 
                 className="download-report-btn"
                 onClick={(e) => {
@@ -592,7 +601,7 @@ const FileUpload = ({ onProcessingComplete }) => {
                   link.click();
                   document.body.removeChild(link);
                 }}
-                title="Download incorrect records report"
+                title={isWarning ? "Download duplicate records report" : "Download incorrect records report"}
               >
                 📥
               </button>
@@ -603,7 +612,16 @@ const FileUpload = ({ onProcessingComplete }) => {
           </div>
           {(!isCollapsible || isExpanded) && (
           <div className="validation-details">
-            {validation.step === 'column_validation' ? (
+            {isWarning ? (
+              <>
+                <p>{validation.message}</p>
+                {validation.download_file && (
+                  <div className="missing-columns">
+                    <p>Click the download icon to get a report of all duplicate records.</p>
+                  </div>
+                )}
+              </>
+            ) : validation.step === 'column_validation' ? (
               <>
                 {!validation.valid && (
                   <>
