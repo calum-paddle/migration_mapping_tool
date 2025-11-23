@@ -1027,6 +1027,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         print(f"Of these, {missing_postal_validation['available_from_mapping']} can be pulled from mapping file.")
         
         # Handle user choices for missing postal codes
+        # Initialize updated_count to track how many records were pulled from mapping file
+        updated_count = 0
         if use_mapping_postal_codes and missing_postal_validation['available_from_mapping'] > 0:
             print("User chose to use mapping postal codes. Pulling postal codes from mapping file...")
             
@@ -1129,7 +1131,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                             validation_results.append({
                                 'valid': True,
                                 'step': 'missing_postal_code_validation',
-                                'total_records': missing_postal_validation['total_records']
+                                'total_records': missing_postal_validation['total_records'],
+                                'pulled_from_mapping_count': updated_count
                             })
                         else:
                             # Still have missing postal codes after update - continue processing
@@ -1165,6 +1168,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                 'missing_count': missing_postal_validation['missing_count'],
                                 'total_records': missing_postal_validation['total_records'],
                                 'available_from_mapping': missing_postal_validation.get('available_from_mapping', 0),
+                                'pulled_from_mapping_count': updated_count,
                                 'download_file': download_file
                             })
             else:
@@ -1282,6 +1286,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 'missing_count': missing_postal_validation['missing_count'],
                 'total_records': missing_postal_validation['total_records'],
                 'available_from_mapping': missing_postal_validation['available_from_mapping'],
+                'pulled_from_mapping_count': 0,  # No records pulled since checkbox not checked
                 'download_file': download_file
             })
     else:
@@ -1291,7 +1296,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         validation_results.append({
             'valid': True,
             'step': 'missing_postal_code_validation',
-            'total_records': missing_postal_validation['total_records']
+            'total_records': missing_postal_validation['total_records'],
+            'pulled_from_mapping_count': 0  # No records pulled since validation passed without action
         })
     
     # Provider-specific column removal and ordering
@@ -1598,6 +1604,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             print(f"Of these, {us_postal_validation['autocorrectable_count']} can be autocorrected with leading zeros.")
             
             # Check if autocorrect is requested
+            autocorrected_count = 0
             if autocorrect_us_postal and us_postal_validation['autocorrectable_count'] > 0:
                 print("Autocorrecting 4-digit US postal codes with leading zeros...")
                 
@@ -1605,13 +1612,16 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 us_records_mask = completed['address_country_code'] == 'US'
                 four_digit_mask = completed['address_postal_code'].astype(str).str.match(r'^\d{4}$')
                 
+                # Count how many will be corrected
+                autocorrected_count = int((us_records_mask & four_digit_mask).sum())
+                
                 # Apply autocorrect
                 completed.loc[us_records_mask & four_digit_mask, 'address_postal_code'] = \
                     completed.loc[us_records_mask & four_digit_mask, 'address_postal_code'].astype(str).str.zfill(5)
                 
-                print(f"Autocorrected {us_postal_validation['autocorrectable_count']} US postal codes.")
+                print(f"Autocorrected {autocorrected_count} US postal codes.")
                 
-                # Re-run US validation to check if all issues are resolved
+                # Re-run US validation to check if all issues are resolved after autocorrecting
                 us_postal_validation = validate_us_postal_codes(completed, seller_name, is_sandbox)
             
             # Save incorrect records to a file for download (whether autocorrected or not)
@@ -1624,7 +1634,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
                     clean_seller_name = clean_seller_name.replace(' ', '_')
                     env_suffix = "_sandbox" if is_sandbox else "_production"
-                    filename_suffix = "_after_autocorrect" if (autocorrect_us_postal and us_postal_validation['autocorrectable_count'] > 0) else ""
+                    filename_suffix = "_after_autocorrect" if autocorrected_count > 0 else ""
                     incorrect_filename = f"{clean_seller_name}_invalid_us_postal_codes{filename_suffix}{env_suffix}_{int(time.time())}.csv"
                     incorrect_path = os.path.join(output_dir, incorrect_filename)
                     us_postal_validation['incorrect_records'].to_csv(incorrect_path, index=False)
@@ -1639,9 +1649,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 validation_results.append({
                     'valid': True,
                     'step': 'us_postal_code_validation',
-                    'total_records': us_postal_validation['total_records'],
-                    'autocorrected': True,
-                    'autocorrected_count': us_postal_validation.get('autocorrectable_count', 0)
+                    'total_records': us_postal_validation.get('total_records', 0),
+                    'autocorrected_count': int(autocorrected_count)
                 })
             else:
                 # Still have invalid codes (either no autocorrect or autocorrect didn't fix everything)
@@ -1660,10 +1669,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 validation_results.append({
                     'valid': False,
                     'step': 'us_postal_code_validation',
-                    'incorrect_count': us_postal_validation['incorrect_count'] if us_postal_validation else 0,
-                    'total_records': us_postal_validation['total_records'] if us_postal_validation else 0,
+                    'incorrect_count': us_postal_validation.get('incorrect_count', 0) if us_postal_validation else 0,
+                    'total_records': us_postal_validation.get('total_records', 0) if us_postal_validation else 0,
                     'download_file': download_file,
-                    'autocorrectable_count': us_postal_validation['autocorrectable_count'] if us_postal_validation else 0
+                    'autocorrectable_count': us_postal_validation.get('autocorrectable_count', 0) if us_postal_validation else 0,
+                    'autocorrected_count': int(autocorrected_count)
                 })
         else:
             print(f"US postal code validation passed. All {us_postal_validation['total_records']} US postal codes are correctly formatted.")
@@ -1672,6 +1682,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             validation_results.append({
                 'valid': True,
                 'step': 'us_postal_code_validation',
+                'autocorrected_count': 0,  # No records autocorrected since validation passed without action
                 'total_records': us_postal_validation['total_records']
             })
     
@@ -1968,7 +1979,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             # Add all other fields that exist
             for key in ['missing_columns', 'total_columns', 'optional_columns', 'incorrect_count', 
                        'total_records', 'download_file', 'error', 'missing_count', 'available_from_mapping',
-                       'autocorrectable_count', 'autocorrected', 'autocorrected_count', 'type', 'count', 'message']:
+                       'pulled_from_mapping_count', 'autocorrectable_count', 'autocorrected', 'autocorrected_count', 'type', 'count', 'message']:
                 if key in validation:
                     clean_validation[key] = validation[key]
             clean_validation_results.append(clean_validation)

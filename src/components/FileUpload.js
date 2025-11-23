@@ -17,6 +17,8 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [waitingForUserInput, setWaitingForUserInput] = useState(false);
   const [expandedValidations, setExpandedValidations] = useState(new Set());
   const [zipFile, setZipFile] = useState(null);
+  const [useMappingZipCodes, setUseMappingZipCodes] = useState(false);
+  const [autocorrectUsZipCodes, setAutocorrectUsZipCodes] = useState(false);
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -314,24 +316,6 @@ const FileUpload = ({ onProcessingComplete }) => {
         setProcessingStatus('Processing completed successfully!');
         setIsProcessing(false);
         setWaitingForUserInput(false);
-      } else if (result.status === 'autocorrect_requested') {
-        // Restart processing with autocorrect flag
-        setProcessingStatus('Restarting processing with autocorrect...');
-        // Reset validation results to start fresh
-        setValidationResults([]);
-        setWaitingForUserInput(false);
-        
-        // Restart the processing with autocorrect
-        await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, true);
-      } else if (result.status === 'mapping_postal_codes_requested') {
-        // Restart processing with mapping postal codes flag
-        setProcessingStatus('Restarting processing with mapping postal codes...');
-        // Reset validation results to start fresh
-        setValidationResults([]);
-        setWaitingForUserInput(false);
-        
-        // Restart the processing with mapping postal codes
-        await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, false, true);
       } else if (result.status === 'proceed_without_missing_records_requested') {
         // Restart processing with proceed without missing records flag
         setProcessingStatus('Restarting processing without missing records...');
@@ -375,8 +359,8 @@ const FileUpload = ({ onProcessingComplete }) => {
         throw new Error('Backend server is not responding. Please ensure the Python server is running on port 5001.');
       }
       
-      // Process the migration with basic parameters only
-      await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider);
+      // Process the migration with checkbox values
+      await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, autocorrectUsZipCodes, useMappingZipCodes);
       
     } catch (err) {
       setError('Error processing migration: ' + err.message);
@@ -529,6 +513,43 @@ const FileUpload = ({ onProcessingComplete }) => {
           </div>
         </div>
 
+        <div className="checkbox-group">
+          <div className="checkbox-item">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={useMappingZipCodes}
+                onChange={(e) => setUseMappingZipCodes(e.target.checked)}
+                className="checkbox-input"
+              />
+              <span>Use Mapping ZIP Codes</span>
+              <div className="info-icon-wrapper">
+                <span className="info-icon">ℹ️</span>
+                <div className="tooltip">
+                  If any required ZIP codes are missing, use ZIP codes from the mapping file if available.
+                </div>
+              </div>
+            </label>
+          </div>
+          <div className="checkbox-item">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={autocorrectUsZipCodes}
+                onChange={(e) => setAutocorrectUsZipCodes(e.target.checked)}
+                className="checkbox-input"
+              />
+              <span>Autocorrect US ZIP codes leading zeros</span>
+              <div className="info-icon-wrapper">
+                <span className="info-icon">ℹ️</span>
+                <div className="tooltip">
+                  Detect when a US ZIP code is only 4 digits and add a leading zero
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
+
         <button type="submit" disabled={isProcessing} className="submit-btn">
           {isProcessing ? (
             <div className="loading-spinner">
@@ -561,7 +582,27 @@ const FileUpload = ({ onProcessingComplete }) => {
       {validationResults.map((validation, index) => {
         const isExpanded = expandedValidations.has(validation.step);
         const isWarning = validation.type === 'warning';
-        const isCollapsible = !validation.valid || isWarning; // Failed validations and warnings are collapsible
+        
+        // Determine if validation box should be collapsible
+        // Failed validations and warnings are always collapsible
+        // Successful validations are only collapsible if they have additional content
+        let isCollapsible = false;
+        if (!validation.valid || isWarning) {
+          // Failed validations and warnings are always collapsible
+          isCollapsible = true;
+        } else if (validation.valid) {
+          // Successful validations are only collapsible if they have content to show
+          if (validation.step === 'us_postal_code_validation' && validation.autocorrected_count > 0) {
+            isCollapsible = true;
+          } else if (validation.step === 'missing_postal_code_validation' && validation.pulled_from_mapping_count > 0) {
+            isCollapsible = true;
+          } else if (validation.step === 'successfully_mapped_records') {
+            // Successfully mapped records always has content (message + download)
+            isCollapsible = true;
+          }
+          // Other successful validations with no additional content are not collapsible
+        }
+        
         const validationKey = validation.timestamp || index;
         
         const isSuccessfullyMapped = validation.step === 'successfully_mapped_records';
@@ -712,27 +753,23 @@ const FileUpload = ({ onProcessingComplete }) => {
               </>
             ) : validation.step === 'us_postal_code_validation' ? (
               <>
-                {!validation.valid && (
+                {!validation.valid ? (
                   <>
                     <p>US postal codes must be exactly 5 numerical digits.</p>
                     <div className="missing-columns">
                       <p><strong>Found {validation.incorrect_count} US postal codes with incorrect format.</strong></p>
-                      {validation.autocorrectable_count > 0 && (
-                        <p><strong>*{validation.autocorrectable_count} can be autocorrected with leading zeros.</strong></p>
+                      {validation.autocorrected_count > 0 && (
+                        <p><strong>{validation.autocorrected_count} were autocorrected with leading zeros.</strong></p>
                       )}
                       <p>Click the download icon to get a report of all incorrect records.</p>
                     </div>
-                    {validation.autocorrectable_count > 0 && (
-                      <div className="user-input-options" style={{paddingTop: 0}}>
-                        <div className="user-input-buttons" style={{justifyContent: 'center', alignItems: 'center'}}>
-                          <button 
-                            onClick={() => handleUserInput(validation.step, 'autocorrect_leading_zeros')}
-                            className="user-input-btn"
-                            disabled={isProcessing}
-                          >
-                            Autocorrect leading zeros
-                          </button>
-                        </div>
+                  </>
+                ) : (
+                  <>
+                    <p>US postal codes must be exactly 5 numerical digits.</p>
+                    {validation.autocorrected_count > 0 && (
+                      <div className="missing-columns">
+                        <p><strong>{validation.autocorrected_count} US postal codes were autocorrected with leading zeros.</strong></p>
                       </div>
                     )}
                   </>
@@ -740,27 +777,23 @@ const FileUpload = ({ onProcessingComplete }) => {
               </>
             ) : validation.step === 'missing_postal_code_validation' ? (
               <>
-                {!validation.valid && (
+                {!validation.valid ? (
                   <>
                     <p>Postal codes are required for AU, CA, FR, DE, IN, IT, NL, ES, GB, US addresses.</p>
                     <div className="missing-columns">
                       <p><strong>Found {validation.missing_count} records with missing postal codes.</strong></p>
-                      {validation.available_from_mapping > 0 && (
-                        <p><strong>*{validation.available_from_mapping} can be pulled from mapping file.</strong></p>
+                      {validation.pulled_from_mapping_count > 0 && (
+                        <p><strong>{validation.pulled_from_mapping_count} postal codes were pulled from the mapping file.</strong></p>
                       )}
                       <p>Click the download icon to get a report of all missing records.</p>
                     </div>
-                    {validation.available_from_mapping > 0 && (
-                      <div className="user-input-options" style={{paddingTop: 0}}>
-                        <div className="user-input-buttons" style={{justifyContent: 'center', alignItems: 'center'}}>
-                          <button 
-                            onClick={() => handleUserInput(validation.step, 'use_mapping_postal_codes')}
-                            className="user-input-btn"
-                            disabled={isProcessing}
-                          >
-                            Use Mapping File Postal Codes
-                          </button>
-                        </div>
+                  </>
+                ) : (
+                  <>
+                    <p>Postal codes are required for AU, CA, FR, DE, IN, IT, NL, ES, GB, US addresses.</p>
+                    {validation.pulled_from_mapping_count > 0 && (
+                      <div className="missing-columns">
+                        <p><strong>{validation.pulled_from_mapping_count} postal codes were pulled from the mapping file.</strong></p>
                       </div>
                     )}
                   </>
