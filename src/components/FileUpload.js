@@ -674,7 +674,7 @@ const FileUpload = ({ onProcessingComplete }) => {
               <span className="user-input-required">❓</span>
             )}
           </div>
-          {(!isCollapsible || isExpanded) && (
+          {(!isCollapsible || isExpanded) && !(validation.step === 'column_validation' && validation.valid) && (
           <div className="validation-details">
             {isWarning ? (
               <>
@@ -840,9 +840,7 @@ const FileUpload = ({ onProcessingComplete }) => {
               </>
             ) : (
               <>
-                {validation.valid ? (
-                  <p>Validation passed</p>
-                ) : (
+                {validation.valid ? null : (
                   <p>Validation failed</p>
                 )}
               </>
