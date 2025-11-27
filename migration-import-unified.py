@@ -339,12 +339,12 @@ def validate_date_periods(subscriber_data, seller_name='', is_sandbox=False):
             'incorrect_records': None
         }
 
-def validate_missing_postal_codes(data, provider, seller_name='', is_sandbox=False):
+def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False):
     """
-    Validate missing postal codes for specific countries and check if they can be filled from mapping file
+    Validate missing zip codes for specific countries and check if they can be filled from mapping file
     """
     try:
-        # Countries that require postal codes
+        # Countries that require zip codes
         required_countries = ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US']
         
         # Filter for records from required countries
@@ -359,14 +359,14 @@ def validate_missing_postal_codes(data, provider, seller_name='', is_sandbox=Fal
                 'missing_records': None
             }
         
-        # Find records with missing postal codes
-        missing_postal_codes = required_records[
+        # Find records with missing zip codes
+        missing_zip_codes = required_records[
             required_records['address_postal_code'].isna() | 
             (required_records['address_postal_code'].astype(str).str.strip() == '')
         ].copy()
         
         # Calculate missing_count early so we can preserve it even if an exception occurs later
-        missing_count = len(missing_postal_codes)
+        missing_count = len(missing_zip_codes)
         total_records_count = len(required_records)
         
         if missing_count == 0:
@@ -381,27 +381,27 @@ def validate_missing_postal_codes(data, provider, seller_name='', is_sandbox=Fal
         # Check mapping file column name based on provider
         mapping_column = 'card.address_zip' if provider.lower() == 'stripe' else 'Zip Code'
         
-        # Count records that have postal codes available in mapping file (already merged)
+        # Count records that have zip codes available in mapping file (already merged)
         # Check if mapping column exists before trying to use it
         available_count = 0
-        if mapping_column in missing_postal_codes.columns:
+        if mapping_column in missing_zip_codes.columns:
             try:
-                available_from_mapping = missing_postal_codes[
-                    missing_postal_codes[mapping_column].notna() & 
-                    (missing_postal_codes[mapping_column].astype(str).str.strip() != '')
+                available_from_mapping = missing_zip_codes[
+                    missing_zip_codes[mapping_column].notna() & 
+                    (missing_zip_codes[mapping_column].astype(str).str.strip() != '')
                 ]
                 available_count = len(available_from_mapping)
             except Exception as e:
-                print(f"Warning: Error counting available postal codes from mapping: {e}")
+                print(f"Warning: Error counting available zip codes from mapping: {e}")
                 available_count = 0
         
         # Convert all columns to strings to prevent float conversion in CSV
         # Wrap this in try/except to preserve missing_count even if conversion fails
         try:
-            if not missing_postal_codes.empty:
-                for col in missing_postal_codes.columns:
-                    missing_postal_codes[col] = missing_postal_codes[col].fillna('').astype(str).replace('nan', '')
-                    missing_postal_codes[col] = missing_postal_codes[col].str.replace(r'\.0$', '', regex=True)
+            if not missing_zip_codes.empty:
+                for col in missing_zip_codes.columns:
+                    missing_zip_codes[col] = missing_zip_codes[col].fillna('').astype(str).replace('nan', '')
+                    missing_zip_codes[col] = missing_zip_codes[col].str.replace(r'\.0$', '', regex=True)
         except Exception as e:
             print(f"Warning: Error converting columns to strings: {e}")
             # Continue with unconverted data - missing_count is still valid
@@ -411,11 +411,11 @@ def validate_missing_postal_codes(data, provider, seller_name='', is_sandbox=Fal
             'missing_count': missing_count,
             'total_records': total_records_count,
             'available_from_mapping': available_count,
-            'missing_records': missing_postal_codes
+            'missing_records': missing_zip_codes
         }
         
     except Exception as e:
-        print(f"Error in missing postal code validation: {e}")
+        print(f"Error in missing zip code validation: {e}")
         import traceback
         traceback.print_exc()
         # Try to preserve any counts we might have calculated
@@ -428,9 +428,9 @@ def validate_missing_postal_codes(data, provider, seller_name='', is_sandbox=Fal
             'missing_records': None
         }
 
-def validate_ca_postal_codes(data, seller_name='', is_sandbox=False):
+def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
     """
-    Validate Canadian postal codes for records with address_country_code = 'CA'
+    Validate Canadian zip codes for records with address_country_code = 'CA'
     
     Args:
         data: DataFrame containing the merged data
@@ -454,19 +454,19 @@ def validate_ca_postal_codes(data, seller_name='', is_sandbox=False):
                 'incorrect_records': None
             }
         
-        # Canadian postal code regex pattern
+        # Canadian zip code regex pattern
         # Format: Letter-Number-Letter Number-Letter-Number (e.g., A1A 1A1)
         # Letters exclude D, F, I, O, Q, U, W, Z
-        ca_postal_pattern = r'^[A-CEGHJ-NPR-TV-Z]\d[A-CEGHJ-NPR-TV-Z] ?\d[A-CEGHJ-NPR-TV-Z]\d$'
+        ca_zip_pattern = r'^[A-CEGHJ-NPR-TV-Z]\d[A-CEGHJ-NPR-TV-Z] ?\d[A-CEGHJ-NPR-TV-Z]\d$'
         
-        # Filter out missing/empty postal codes (those are handled by missing postal code validation)
-        # Only validate format for records that have postal codes
-        ca_records_with_postal = ca_records[
+        # Filter out missing/empty zip codes (those are handled by missing zip code validation)
+        # Only validate format for records that have zip codes
+        ca_records_with_zip = ca_records[
             ca_records['address_postal_code'].notna() & 
             (ca_records['address_postal_code'].astype(str).str.strip() != '')
         ].copy()
         
-        if len(ca_records_with_postal) == 0:
+        if len(ca_records_with_zip) == 0:
             return {
                 'valid': True,
                 'incorrect_count': 0,
@@ -474,40 +474,40 @@ def validate_ca_postal_codes(data, seller_name='', is_sandbox=False):
                 'incorrect_records': None
             }
         
-        # Check postal codes format (only for records that have postal codes)
-        invalid_postal_codes = ca_records_with_postal[
-            ~ca_records_with_postal['address_postal_code'].astype(str).str.match(ca_postal_pattern, case=False)
+        # Check zip codes format (only for records that have zip codes)
+        invalid_zip_codes = ca_records_with_zip[
+            ~ca_records_with_zip['address_postal_code'].astype(str).str.match(ca_zip_pattern, case=False)
         ].copy()
         
         # Convert all columns to strings to prevent float conversion in CSV
-        if not invalid_postal_codes.empty:
-            print(f"DEBUG: CA validation - Found {len(invalid_postal_codes)} invalid records")
-            print(f"DEBUG: CA validation - DataFrame shape: {invalid_postal_codes.shape}")
+        if not invalid_zip_codes.empty:
+            print(f"DEBUG: CA validation - Found {len(invalid_zip_codes)} invalid records")
+            print(f"DEBUG: CA validation - DataFrame shape: {invalid_zip_codes.shape}")
             print(f"DEBUG: CA validation - Column dtypes before conversion:")
-            for col in invalid_postal_codes.columns:
-                print(f"  {col}: {invalid_postal_codes[col].dtype}")
-                print(f"  Sample values: {invalid_postal_codes[col].head(3).tolist()}")
+            for col in invalid_zip_codes.columns:
+                print(f"  {col}: {invalid_zip_codes[col].dtype}")
+                print(f"  Sample values: {invalid_zip_codes[col].head(3).tolist()}")
             
-            for col in invalid_postal_codes.columns:
+            for col in invalid_zip_codes.columns:
                 # Handle NaN values and ensure all data is string
-                invalid_postal_codes[col] = invalid_postal_codes[col].fillna('').astype(str).replace('nan', '')
+                invalid_zip_codes[col] = invalid_zip_codes[col].fillna('').astype(str).replace('nan', '')
                 # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
-                invalid_postal_codes[col] = invalid_postal_codes[col].str.replace(r'\.0$', '', regex=True)
+                invalid_zip_codes[col] = invalid_zip_codes[col].str.replace(r'\.0$', '', regex=True)
             
             print(f"DEBUG: CA validation - Column dtypes after conversion:")
-            for col in invalid_postal_codes.columns:
-                print(f"  {col}: {invalid_postal_codes[col].dtype}")
-                print(f"  Sample values: {invalid_postal_codes[col].head(3).tolist()}")
+            for col in invalid_zip_codes.columns:
+                print(f"  {col}: {invalid_zip_codes[col].dtype}")
+                print(f"  Sample values: {invalid_zip_codes[col].head(3).tolist()}")
         
         return {
-            'valid': len(invalid_postal_codes) == 0,
-            'incorrect_count': len(invalid_postal_codes),
-            'incorrect_records': invalid_postal_codes,
-            'total_records': len(ca_records_with_postal)
+            'valid': len(invalid_zip_codes) == 0,
+            'incorrect_count': len(invalid_zip_codes),
+            'incorrect_records': invalid_zip_codes,
+            'total_records': len(ca_records_with_zip)
         }
         
     except Exception as e:
-        print(f"Error in CA postal code validation: {e}")
+        print(f"Error in CA zip code validation: {e}")
         return {
             'valid': False,
             'error': f'Validation error: {str(e)}',
@@ -516,9 +516,9 @@ def validate_ca_postal_codes(data, seller_name='', is_sandbox=False):
             'incorrect_records': None
         }
 
-def validate_us_postal_codes(data, seller_name='', is_sandbox=False):
+def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
     """
-    Validate US postal codes for records with address_country_code = 'US'
+    Validate US zip codes for records with address_country_code = 'US'
     
     Args:
         data: DataFrame containing the merged data
@@ -543,17 +543,17 @@ def validate_us_postal_codes(data, seller_name='', is_sandbox=False):
                 'autocorrectable_count': 0
             }
         
-        # US postal code regex pattern - only 5 digits
-        us_postal_pattern = r'^\d{5}$'
+        # US zip code regex pattern - only 5 digits
+        us_zip_pattern = r'^\d{5}$'
         
-        # Filter out missing/empty postal codes (those are handled by missing postal code validation)
-        # Only validate format for records that have postal codes
-        us_records_with_postal = us_records[
+        # Filter out missing/empty zip codes (those are handled by missing zip code validation)
+        # Only validate format for records that have zip codes
+        us_records_with_zip = us_records[
             us_records['address_postal_code'].notna() & 
             (us_records['address_postal_code'].astype(str).str.strip() != '')
         ].copy()
         
-        if len(us_records_with_postal) == 0:
+        if len(us_records_with_zip) == 0:
             return {
                 'valid': True,
                 'incorrect_count': 0,
@@ -562,35 +562,35 @@ def validate_us_postal_codes(data, seller_name='', is_sandbox=False):
                 'autocorrectable_count': 0
             }
         
-        # Check postal codes format (only for records that have postal codes)
-        invalid_postal_codes = us_records_with_postal[
-            ~us_records_with_postal['address_postal_code'].astype(str).str.match(us_postal_pattern)
+        # Check zip codes format (only for records that have zip codes)
+        invalid_zip_codes = us_records_with_zip[
+            ~us_records_with_zip['address_postal_code'].astype(str).str.match(us_zip_pattern)
         ].copy()
         
         # Count 4-digit codes that can be autocorrected
-        four_digit_codes = us_records_with_postal[
-            us_records_with_postal['address_postal_code'].astype(str).str.match(r'^\d{4}$')
+        four_digit_codes = us_records_with_zip[
+            us_records_with_zip['address_postal_code'].astype(str).str.match(r'^\d{4}$')
         ]
         autocorrectable_count = len(four_digit_codes)
         
         # Convert all columns to strings to prevent float conversion in CSV
-        if not invalid_postal_codes.empty:
-            for col in invalid_postal_codes.columns:
+        if not invalid_zip_codes.empty:
+            for col in invalid_zip_codes.columns:
                 # Handle NaN values and ensure all data is string
-                invalid_postal_codes[col] = invalid_postal_codes[col].fillna('').astype(str).replace('nan', '')
+                invalid_zip_codes[col] = invalid_zip_codes[col].fillna('').astype(str).replace('nan', '')
                 # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
-                invalid_postal_codes[col] = invalid_postal_codes[col].str.replace(r'\.0$', '', regex=True)
+                invalid_zip_codes[col] = invalid_zip_codes[col].str.replace(r'\.0$', '', regex=True)
         
         return {
-            'valid': len(invalid_postal_codes) == 0,
-            'incorrect_count': len(invalid_postal_codes),
-            'incorrect_records': invalid_postal_codes,
-            'total_records': len(us_records_with_postal),
+            'valid': len(invalid_zip_codes) == 0,
+            'incorrect_count': len(invalid_zip_codes),
+            'incorrect_records': invalid_zip_codes,
+            'total_records': len(us_records_with_zip),
             'autocorrectable_count': autocorrectable_count
         }
         
     except Exception as e:
-        print(f"Error in US postal code validation: {e}")
+        print(f"Error in US zip code validation: {e}")
         return {
             'valid': False,
             'error': f'Validation error: {str(e)}',
@@ -600,7 +600,7 @@ def validate_us_postal_codes(data, seller_name='', is_sandbox=False):
             'autocorrectable_count': 0
         }
 
-def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', autocorrect_us_postal=False, use_mapping_postal_codes=False, proceed_without_missing_records=False):
+def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', autocorrect_us_zip=False, use_mapping_zip_codes=False, proceed_without_missing_records=False):
     """
     Process migration from payment providers to Paddle Billing
     
@@ -842,12 +842,12 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     except Exception as e:
         print(f"Error during date validation: {e}")
         validation_results.append({
-            'valid': False,
+                'valid': False,
             'step': 'date_validation',
-            'error': f'Validation error: {str(e)}',
-            'incorrect_count': 0,
-            'total_records': 0,
-            'download_file': None
+                'error': f'Validation error: {str(e)}',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'download_file': None
         })
     
     if date_validation:
@@ -872,24 +872,24 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     print(f"Saved incorrect records to: {incorrect_path}")
                 except Exception as e:
                     print(f"Error saving incorrect records file: {e}")
-            
-            # Collect failed _temp_row_id values from incorrect records
-            if date_validation['incorrect_records'] is not None and '_temp_row_id' in date_validation['incorrect_records'].columns:
-                # Convert back from string to int (since validation functions convert all columns to strings)
-                temp_ids = date_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                failed_ids = [x for x in failed_ids if x is not None]
-                failed_row_ids.update(failed_ids)
-                print(f"Collected {len(failed_ids)} failed row IDs from date period validation: {failed_ids[:10]}")
-            
-            # Add failed validation to results but continue processing
-            validation_results.append({
-                'valid': False,
-                'step': 'date_validation',
-                'incorrect_count': date_validation['incorrect_count'],
-                'total_records': date_validation['total_records'],
-                'download_file': download_file
-            })
+                
+                # Collect failed _temp_row_id values from incorrect records
+                if date_validation['incorrect_records'] is not None and '_temp_row_id' in date_validation['incorrect_records'].columns:
+                    # Convert back from string to int (since validation functions convert all columns to strings)
+                    temp_ids = date_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                    failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                    failed_ids = [x for x in failed_ids if x is not None]
+                    failed_row_ids.update(failed_ids)
+                    print(f"Collected {len(failed_ids)} failed row IDs from date period validation: {failed_ids[:10]}")
+                
+                # Add failed validation to results but continue processing
+                validation_results.append({
+                    'valid': False,
+                    'step': 'date_validation',
+                    'incorrect_count': date_validation['incorrect_count'],
+                    'total_records': date_validation['total_records'],
+                    'download_file': download_file
+                })
         else:
             print(f"Date validation passed. All {date_validation['total_records']} date periods are valid.")
             # Add successful date validation to results
@@ -925,7 +925,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         })
         
         # Select necessary columns for the merge
-        # Include 'Zip Code' column if it exists in mapping data (needed for postal code validation)
+        # Include 'Zip Code' column if it exists in mapping data (needed for zip code validation)
         columns_to_keep = [
             'card_token',  # This is used for the merge
             'original_credit_card_number',  # Preserve the original credit card number
@@ -951,7 +951,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             how='outer'
         )
         
-        # Keep only rows where `card_token` is not null
+        # Keep only rows where `card_token` is not null (from either side)
         finaljoin = finaljoin[finaljoin['card_token'].notna()]
         
         # Check for duplicate card_tokens BEFORE replacing with full card number
@@ -959,9 +959,18 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         duplicate_token_mask = finaljoin.duplicated(subset='card_token', keep=False)
         finaljoin['is_duplicate_token'] = duplicate_token_mask
         
+        # Identify records without a match BEFORE replacing card_token
+        # A record has no token if it doesn't have original_credit_card_number from mapping file
+        # Store this info before we replace card_token
+        no_token_mask = finaljoin['original_credit_card_number'].isna()
+        
         # Replace `card_token` in the final DataFrame with the original `Credit Card Number` from the mapping data
+        # Only replace for records that have a match (original_credit_card_number is not null)
         finaljoin.loc[finaljoin['original_credit_card_number'].notna(), 'card_token'] = \
             finaljoin.loc[finaljoin['original_credit_card_number'].notna(), 'original_credit_card_number']
+        
+        # For records without a match, set card_token to null so they can be identified later
+        finaljoin.loc[no_token_mask, 'card_token'] = None
         
         # Drop the 'original_credit_card_number' column, as we no longer need it in the final output
         finaljoin = finaljoin.drop(columns=['original_credit_card_number'])
@@ -1002,14 +1011,14 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         
         completed['card_holder_name'] = completed['card_holder_name'].fillna(completed['customer_full_name'])
     
-    # Missing Postal Code Validation (after merge, before column removal)
-    print("Validating missing postal codes...")
+    # Missing Zip Code Validation (after merge, before column removal)
+    print("Validating missing zip codes...")
     try:
-        missing_postal_validation = validate_missing_postal_codes(completed, provider, seller_name, is_sandbox)
+        missing_zip_validation = validate_missing_zip_codes(completed, provider, seller_name, is_sandbox)
     except Exception as e:
-        print(f"Error during missing postal code validation: {e}")
+        print(f"Error during missing zip code validation: {e}")
         return {
-            'error': 'Missing postal code validation error',
+            'error': 'Missing zip code validation error',
             'validation_result': {
                 'valid': False,
                 'error': f'Validation error: {str(e)}',
@@ -1018,22 +1027,22 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 'available_from_mapping': 0,
                 'download_file': None
             },
-            'step': 'missing_postal_code_validation',
+            'step': 'missing_zip_code_validation',
             'validation_results': validation_results
         }
     
-    if not missing_postal_validation['valid']:
-        print(f"Missing postal code validation failed. Found {missing_postal_validation['missing_count']} missing postal codes.")
-        print(f"Of these, {missing_postal_validation['available_from_mapping']} can be pulled from mapping file.")
+    if not missing_zip_validation['valid']:
+        print(f"Missing zip code validation failed. Found {missing_zip_validation['missing_count']} missing zip codes.")
+        print(f"Of these, {missing_zip_validation['available_from_mapping']} can be pulled from mapping file.")
         
-        # Handle user choices for missing postal codes
+        # Handle user choices for missing zip codes
         # Initialize updated_count to track how many records were pulled from mapping file
         updated_count = 0
-        if use_mapping_postal_codes and missing_postal_validation['available_from_mapping'] > 0:
-            print("User chose to use mapping postal codes. Pulling postal codes from mapping file...")
+        if use_mapping_zip_codes and missing_zip_validation['available_from_mapping'] > 0:
+            print("User chose to use mapping zip codes. Pulling zip codes from mapping file...")
             
             # Get the missing records that can be fixed
-            missing_records = missing_postal_validation['missing_records']
+            missing_records = missing_zip_validation['missing_records']
             print(f"Missing records DataFrame columns: {missing_records.columns.tolist() if missing_records is not None else 'None'}")
             
             if missing_records is not None and len(missing_records) > 0:
@@ -1046,35 +1055,35 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     print(f"Error: '{mapping_column}' column not found in merged data. Available columns: {completed.columns.tolist()}")
                     # Add error to validation results but continue processing
                     validation_results.append({
-                        'valid': False,
-                        'step': 'missing_postal_code_validation',
-                        'error': f'Mapping column {mapping_column} not found in merged data',
-                        'missing_count': missing_postal_validation['missing_count'],
-                        'total_records': missing_postal_validation['total_records'],
-                        'available_from_mapping': missing_postal_validation['available_from_mapping'],
+                            'valid': False,
+                        'step': 'missing_zip_code_validation',
+                            'error': f'Mapping column {mapping_column} not found in merged data',
+                        'missing_count': missing_zip_validation['missing_count'],
+                        'total_records': missing_zip_validation['total_records'],
+                        'available_from_mapping': missing_zip_validation['available_from_mapping'],
                         'download_file': None
                     })
                 else:
-                    # Update the main dataset with postal codes from mapping
+                    # Update the main dataset with zip codes from mapping
                     updated_count = 0
                     print(f"Missing records card_tokens: {missing_records['card_token'].tolist()}")
                     
-                    # For each missing record, copy the postal code from the mapping column to address_postal_code
+                    # For each missing record, copy the zip code from the mapping column to address_postal_code
                     # Use the row index from missing_records (which corresponds to the row in completed)
                     for idx, row in missing_records.iterrows():
                         card_token = row['card_token']
-                        mapping_postal_code = row[mapping_column]
-                        print(f"Processing row {idx}, card_token: {card_token}, mapping postal code: {mapping_postal_code}")
+                        mapping_zip_code = row[mapping_column]
+                        print(f"Processing row {idx}, card_token: {card_token}, mapping zip code: {mapping_zip_code}")
                         
-                        if pd.notna(mapping_postal_code) and str(mapping_postal_code).strip() != '':
+                        if pd.notna(mapping_zip_code) and str(mapping_zip_code).strip() != '':
                             # Basic cleaning: convert to string and strip whitespace
-                            cleaned_postal_code = str(mapping_postal_code).strip()
-                            # Remove .0 suffix if present (from float conversion) - safe for all postal codes
-                            if cleaned_postal_code.endswith('.0'):
-                                cleaned_postal_code = cleaned_postal_code.rstrip('.0')
+                            cleaned_zip_code = str(mapping_zip_code).strip()
+                            # Remove .0 suffix if present (from float conversion) - safe for all zip codes
+                            if cleaned_zip_code.endswith('.0'):
+                                cleaned_zip_code = cleaned_zip_code.rstrip('.0')
                             
                             # Use the row index directly from missing_records (which corresponds to completed)
-                            # This ensures each row gets its specific postal code from the mapping file
+                            # This ensures each row gets its specific zip code from the mapping file
                             if idx in completed.index:
                                 # Check if this is a US record for additional US-specific cleaning
                                 is_us_record = completed.loc[idx, 'address_country_code'] == 'US' if 'address_country_code' in completed.columns else False
@@ -1082,92 +1091,92 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                 if is_us_record:
                                     # For US records only: handle ZIP+4 format and extract digits
                                     # Handle ZIP+4 format (e.g., "12345-6789" -> "12345")
-                                    if '-' in cleaned_postal_code:
-                                        cleaned_postal_code = cleaned_postal_code.split('-')[0]
-                                    # For US, extract digits only (US postal codes are numeric)
+                                    if '-' in cleaned_zip_code:
+                                        cleaned_zip_code = cleaned_zip_code.split('-')[0]
+                                    # For US, extract digits only (US zip codes are numeric)
                                     import re
-                                    digits_only = re.sub(r'\D', '', cleaned_postal_code)
+                                    digits_only = re.sub(r'\D', '', cleaned_zip_code)
                                     if digits_only:
-                                        cleaned_postal_code = digits_only
+                                        cleaned_zip_code = digits_only
                                     
-                                    # Warn if US postal code is not in valid format
-                                    if len(cleaned_postal_code) == 4 and cleaned_postal_code.isdigit():
+                                    # Warn if US zip code is not in valid format
+                                    if len(cleaned_zip_code) == 4 and cleaned_zip_code.isdigit():
                                         # 4-digit code - will be handled by autocorrect if needed
                                         pass
-                                    elif len(cleaned_postal_code) != 5 or not cleaned_postal_code.isdigit():
-                                        print(f"Warning: US postal code '{cleaned_postal_code}' (from mapping: '{mapping_postal_code}') is not in valid format (5 digits or 4 digits).")
+                                    elif len(cleaned_zip_code) != 5 or not cleaned_zip_code.isdigit():
+                                        print(f"Warning: US zip code '{cleaned_zip_code}' (from mapping: '{mapping_zip_code}') is not in valid format (5 digits or 4 digits).")
                                 
-                                # For non-US records, keep the postal code as-is (may contain letters, spaces, etc.)
-                                completed.loc[idx, 'address_postal_code'] = cleaned_postal_code
+                                # For non-US records, keep the zip code as-is (may contain letters, spaces, etc.)
+                                completed.loc[idx, 'address_postal_code'] = cleaned_zip_code
                                 updated_count += 1
-                                print(f"Updated row {idx} with postal code {cleaned_postal_code} (cleaned from {mapping_postal_code})")
+                                print(f"Updated row {idx} with zip code {cleaned_zip_code} (cleaned from {mapping_zip_code})")
                             else:
                                 print(f"Row index {idx} not found in completed DataFrame")
                         else:
-                            print(f"No valid postal code found in mapping for row {idx}, card_token: {card_token}")
+                            print(f"No valid zip code found in mapping for row {idx}, card_token: {card_token}")
                     
-                    print(f"Updated {updated_count} records with postal codes from mapping file.")
+                    print(f"Updated {updated_count} records with zip codes from mapping file.")
                     
-                    # Re-run the missing postal code validation
+                    # Re-run the missing zip code validation
                     try:
-                        missing_postal_validation = validate_missing_postal_codes(completed, provider, seller_name, is_sandbox)
+                        missing_zip_validation = validate_missing_zip_codes(completed, provider, seller_name, is_sandbox)
                     except Exception as e:
-                        print(f"Error during missing postal code validation after update: {e}")
+                        print(f"Error during missing zip code validation after update: {e}")
                         validation_results.append({
                             'valid': False,
-                            'step': 'missing_postal_code_validation',
+                            'step': 'missing_zip_code_validation',
                             'error': f'Validation error after update: {str(e)}',
                             'missing_count': 0,
                             'total_records': 0,
                             'available_from_mapping': 0,
                             'download_file': None
                         })
-                        missing_postal_validation = None
+                        missing_zip_validation = None
                     
-                    if missing_postal_validation:
-                        if missing_postal_validation['valid']:
-                            print(f"Missing postal code validation passed after using mapping postal codes. All {missing_postal_validation['total_records']} records have postal codes.")
-                            # Add successful missing postal code validation to results
+                    if missing_zip_validation:
+                        if missing_zip_validation['valid']:
+                            print(f"Missing zip code validation passed after using mapping zip codes. All {missing_zip_validation['total_records']} records have zip codes.")
+                            # Add successful missing zip code validation to results
                             validation_results.append({
                                 'valid': True,
-                                'step': 'missing_postal_code_validation',
-                                'total_records': missing_postal_validation['total_records'],
+                                'step': 'missing_zip_code_validation',
+                                'total_records': missing_zip_validation['total_records'],
                                 'pulled_from_mapping_count': updated_count
                             })
                         else:
-                            # Still have missing postal codes after update - continue processing
-                            print(f"Still have {missing_postal_validation['missing_count']} missing postal codes after using mapping postal codes.")
+                            # Still have missing zip codes after update - continue processing
+                            print(f"Still have {missing_zip_validation['missing_count']} missing zip codes after using mapping zip codes.")
                             # Save error but continue - will be handled at end
                             download_file = None
-                            if missing_postal_validation['missing_records'] is not None:
+                            if missing_zip_validation['missing_records'] is not None:
                                 try:
                                     output_dir = 'outputs'
                                     os.makedirs(output_dir, exist_ok=True)
                                     clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
                                     clean_seller_name = clean_seller_name.replace(' ', '_')
                                     env_suffix = "_sandbox" if is_sandbox else "_production"
-                                    missing_filename = f"{clean_seller_name}_missing_postal_codes{env_suffix}_{int(time.time())}.csv"
+                                    missing_filename = f"{clean_seller_name}_missing_zip_codes{env_suffix}_{int(time.time())}.csv"
                                     missing_path = os.path.join(output_dir, missing_filename)
-                                    missing_postal_validation['missing_records'].to_csv(missing_path, index=False)
+                                    missing_zip_validation['missing_records'].to_csv(missing_path, index=False)
                                     download_file = missing_filename
                                 except Exception as e:
                                     print(f"Error saving missing records file: {e}")
                             
                             # Collect failed _temp_row_id values from missing records (after mapping update)
-                            if missing_postal_validation['missing_records'] is not None and '_temp_row_id' in missing_postal_validation['missing_records'].columns:
+                            if missing_zip_validation['missing_records'] is not None and '_temp_row_id' in missing_zip_validation['missing_records'].columns:
                                 # Convert back from string to int (since validation functions convert all columns to strings)
-                                temp_ids = missing_postal_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                                temp_ids = missing_zip_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
                                 failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                                 failed_ids = [x for x in failed_ids if x is not None]
                                 failed_row_ids.update(failed_ids)
-                                print(f"Collected {len(failed_ids)} failed row IDs from missing postal code validation (after mapping update): {failed_ids[:10]}")
+                                print(f"Collected {len(failed_ids)} failed row IDs from missing zip code validation (after mapping update): {failed_ids[:10]}")
                             
                             validation_results.append({
                                 'valid': False,
-                                'step': 'missing_postal_code_validation',
-                                'missing_count': missing_postal_validation['missing_count'],
-                                'total_records': missing_postal_validation['total_records'],
-                                'available_from_mapping': missing_postal_validation.get('available_from_mapping', 0),
+                                'step': 'missing_zip_code_validation',
+                                'missing_count': missing_zip_validation['missing_count'],
+                                'total_records': missing_zip_validation['total_records'],
+                                'available_from_mapping': missing_zip_validation.get('available_from_mapping', 0),
                                 'pulled_from_mapping_count': updated_count,
                                 'download_file': download_file
                             })
@@ -1176,77 +1185,77 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 # Continue with the existing error handling logic below
         
         elif proceed_without_missing_records:
-            print("User chose to proceed without missing records. Removing records with missing postal codes...")
+            print("User chose to proceed without missing records. Removing records with missing zip codes...")
             
-            # Remove records with missing postal codes for the specified countries
+            # Remove records with missing zip codes for the specified countries
             target_countries = ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US']
             missing_mask = (completed['address_country_code'].isin(target_countries)) & (completed['address_postal_code'].isna() | (completed['address_postal_code'] == ''))
             
             records_to_remove = completed[missing_mask]
             completed = completed[~missing_mask]
             
-            print(f"Removed {len(records_to_remove)} records with missing postal codes.")
+            print(f"Removed {len(records_to_remove)} records with missing zip codes.")
             print(f"Remaining records: {len(completed)}")
             
-            # Re-run the missing postal code validation
+            # Re-run the missing zip code validation
             try:
-                missing_postal_validation = validate_missing_postal_codes(completed, provider, seller_name, is_sandbox)
+                missing_zip_validation = validate_missing_zip_codes(completed, provider, seller_name, is_sandbox)
             except Exception as e:
-                print(f"Error during missing postal code validation after removal: {e}")
+                print(f"Error during missing zip code validation after removal: {e}")
                 validation_results.append({
-                    'valid': False,
-                    'step': 'missing_postal_code_validation',
+                        'valid': False,
+                    'step': 'missing_zip_code_validation',
                     'error': f'Validation error after removal: {str(e)}',
-                    'missing_count': 0,
-                    'total_records': 0,
-                    'available_from_mapping': 0,
-                    'download_file': None
+                        'missing_count': 0,
+                        'total_records': 0,
+                        'available_from_mapping': 0,
+                        'download_file': None
                 })
-                missing_postal_validation = None
+                missing_zip_validation = None
             
-            if missing_postal_validation:
-                if missing_postal_validation['valid']:
-                    print(f"Missing postal code validation passed after removing missing records. All {missing_postal_validation['total_records']} records have postal codes.")
-                    # Add successful missing postal code validation to results
+            if missing_zip_validation:
+                if missing_zip_validation['valid']:
+                    print(f"Missing zip code validation passed after removing missing records. All {missing_zip_validation['total_records']} records have zip codes.")
+                    # Add successful missing zip code validation to results
                     validation_results.append({
                         'valid': True,
-                        'step': 'missing_postal_code_validation',
-                        'total_records': missing_postal_validation['total_records']
+                        'step': 'missing_zip_code_validation',
+                        'total_records': missing_zip_validation['total_records']
                     })
                 else:
-                    # Still have missing postal codes after removal - continue processing
-                    print(f"Still have {missing_postal_validation['missing_count']} missing postal codes after removal.")
+                    # Still have missing zip codes after removal - continue processing
+                    print(f"Still have {missing_zip_validation['missing_count']} missing zip codes after removal.")
                     # Save error but continue
                     download_file = None
-                    if missing_postal_validation['missing_records'] is not None:
+                    if missing_zip_validation['missing_records'] is not None:
                         try:
                             output_dir = 'outputs'
                             os.makedirs(output_dir, exist_ok=True)
                             clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
                             clean_seller_name = clean_seller_name.replace(' ', '_')
                             env_suffix = "_sandbox" if is_sandbox else "_production"
-                            missing_filename = f"{clean_seller_name}_missing_postal_codes{env_suffix}_{int(time.time())}.csv"
+                            missing_filename = f"{clean_seller_name}_missing_zip_codes{env_suffix}_{int(time.time())}.csv"
                             missing_path = os.path.join(output_dir, missing_filename)
-                            missing_postal_validation['missing_records'].to_csv(missing_path, index=False)
+                            missing_zip_validation['missing_records'].to_csv(missing_path, index=False)
                             download_file = missing_filename
                         except Exception as e:
                             print(f"Error saving missing records file: {e}")
                     
                     # Collect failed _temp_row_id values from missing records
-                    if missing_postal_validation['missing_records'] is not None and '_temp_row_id' in missing_postal_validation['missing_records'].columns:
+                    if missing_zip_validation['missing_records'] is not None and '_temp_row_id' in missing_zip_validation['missing_records'].columns:
                         # Convert back from string to int (since validation functions convert all columns to strings)
-                        temp_ids = missing_postal_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                        temp_ids = missing_zip_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
                         failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                         failed_ids = [x for x in failed_ids if x is not None]
                         failed_row_ids.update(failed_ids)
-                        print(f"Collected {len(failed_ids)} failed row IDs from missing postal code validation: {failed_ids[:10]}")
+                        print(f"Collected {len(failed_ids)} failed row IDs from missing zip code validation: {failed_ids[:10]}")
                     
                     validation_results.append({
                         'valid': False,
-                        'step': 'missing_postal_code_validation',
-                        'missing_count': missing_postal_validation['missing_count'],
-                        'total_records': missing_postal_validation['total_records'],
-                        'available_from_mapping': missing_postal_validation.get('available_from_mapping', 0),
+                        'step': 'missing_zip_code_validation',
+                        'missing_count': missing_zip_validation['missing_count'],
+                        'total_records': missing_zip_validation['total_records'],
+                        'available_from_mapping': missing_zip_validation.get('available_from_mapping', 0),
                         'download_file': download_file
                     })
         
@@ -1254,7 +1263,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             # User hasn't made a choice yet - save error but continue processing
             # Save missing records to a file for download
             download_file = None
-            if missing_postal_validation['missing_records'] is not None:
+            if missing_zip_validation['missing_records'] is not None:
                 try:
                     output_dir = 'outputs'
                     os.makedirs(output_dir, exist_ok=True)
@@ -1264,41 +1273,41 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     env_suffix = "_sandbox" if is_sandbox else "_production"
                     missing_filename = f"{clean_seller_name}_missing_postal_codes{env_suffix}_{int(time.time())}.csv"
                     missing_path = os.path.join(output_dir, missing_filename)
-                    missing_postal_validation['missing_records'].to_csv(missing_path, index=False)
+                    missing_zip_validation['missing_records'].to_csv(missing_path, index=False)
                     download_file = missing_filename
                     print(f"Saved missing records to: {missing_path}")
                 except Exception as e:
                     print(f"Error saving missing records file: {e}")
             
             # Collect failed _temp_row_id values from missing records
-            if missing_postal_validation['missing_records'] is not None and '_temp_row_id' in missing_postal_validation['missing_records'].columns:
+            if missing_zip_validation['missing_records'] is not None and '_temp_row_id' in missing_zip_validation['missing_records'].columns:
                 # Convert back from string to int (since validation functions convert all columns to strings)
-                temp_ids = missing_postal_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                temp_ids = missing_zip_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
                 failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                 failed_ids = [x for x in failed_ids if x is not None]
                 failed_row_ids.update(failed_ids)
-                print(f"Collected {len(failed_ids)} failed row IDs from missing postal code validation: {failed_ids[:10]}")
+                print(f"Collected {len(failed_ids)} failed row IDs from missing zip code validation: {failed_ids[:10]}")
             
             # Add failed validation to results but continue processing
             validation_results.append({
                 'valid': False,
-                'step': 'missing_postal_code_validation',
-                'missing_count': missing_postal_validation['missing_count'],
-                'total_records': missing_postal_validation['total_records'],
-                'available_from_mapping': missing_postal_validation['available_from_mapping'],
+                'step': 'missing_zip_code_validation',
+                'missing_count': missing_zip_validation['missing_count'],
+                'total_records': missing_zip_validation['total_records'],
+                'available_from_mapping': missing_zip_validation['available_from_mapping'],
                 'pulled_from_mapping_count': 0,  # No records pulled since checkbox not checked
                 'download_file': download_file
             })
     else:
-        print(f"Missing postal code validation passed. All {missing_postal_validation['total_records']} records have postal codes.")
+        print(f"Missing zip code validation passed. All {missing_zip_validation['total_records']} records have zip codes.")
         
-        # Add successful missing postal code validation to results
+        # Add successful missing zip code validation to results
         validation_results.append({
             'valid': True,
-            'step': 'missing_postal_code_validation',
-            'total_records': missing_postal_validation['total_records'],
+            'step': 'missing_zip_code_validation',
+            'total_records': missing_zip_validation['total_records'],
             'pulled_from_mapping_count': 0  # No records pulled since validation passed without action
-        })
+    })
     
     # Provider-specific column removal and ordering
     if provider.lower() == 'stripe':
@@ -1516,29 +1525,29 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     else:
         print("enable_checkout column not found")
     
-    # CA Postal Code Validation
-    print("Validating Canadian postal codes...")
-    ca_postal_validation = None
+    # CA Zip Code Validation
+    print("Validating Canadian zip codes...")
+    ca_zip_validation = None
     try:
-        ca_postal_validation = validate_ca_postal_codes(completed, seller_name, is_sandbox)
+        ca_zip_validation = validate_ca_zip_codes(completed, seller_name, is_sandbox)
     except Exception as e:
-        print(f"Error during CA postal code validation: {e}")
+        print(f"Error during CA zip code validation: {e}")
         validation_results.append({
-            'valid': False,
-            'step': 'ca_postal_code_validation',
-            'error': f'Validation error: {str(e)}',
-            'incorrect_count': 0,
-            'total_records': 0,
-            'download_file': None
+                'valid': False,
+            'step': 'ca_zip_code_validation',
+                'error': f'Validation error: {str(e)}',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'download_file': None
         })
     
-    if ca_postal_validation:
-        if not ca_postal_validation['valid']:
-            print(f"CA postal code validation failed. Found {ca_postal_validation['incorrect_count']} incorrect formats.")
+    if ca_zip_validation:
+        if not ca_zip_validation['valid']:
+            print(f"CA zip code validation failed. Found {ca_zip_validation['incorrect_count']} incorrect formats.")
             
             # Save incorrect records to a file for download
             download_file = None
-            if ca_postal_validation['incorrect_records'] is not None:
+            if ca_zip_validation['incorrect_records'] is not None:
                 try:
                     output_dir = 'outputs'
                     os.makedirs(output_dir, exist_ok=True)
@@ -1546,69 +1555,69 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
                     clean_seller_name = clean_seller_name.replace(' ', '_')
                     env_suffix = "_sandbox" if is_sandbox else "_production"
-                    incorrect_filename = f"{clean_seller_name}_invalid_ca_postal_codes{env_suffix}_{int(time.time())}.csv"
+                    incorrect_filename = f"{clean_seller_name}_invalid_ca_zip_codes{env_suffix}_{int(time.time())}.csv"
                     incorrect_path = os.path.join(output_dir, incorrect_filename)
-                    ca_postal_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                    ca_zip_validation['incorrect_records'].to_csv(incorrect_path, index=False)
                     download_file = incorrect_filename
                     print(f"Saved incorrect records to: {incorrect_path}")
                 except Exception as e:
                     print(f"Error saving incorrect records file: {e}")
-            
-            # Collect failed _temp_row_id values from incorrect records
-            if ca_postal_validation['incorrect_records'] is not None and '_temp_row_id' in ca_postal_validation['incorrect_records'].columns:
-                # Convert back from string to int (since validation functions convert all columns to strings)
-                temp_ids = ca_postal_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                failed_ids = [x for x in failed_ids if x is not None]
-                failed_row_ids.update(failed_ids)
-                print(f"Collected {len(failed_ids)} failed row IDs from CA postal code validation: {failed_ids[:10]}")
-            
-            # Add failed validation to results but continue processing
-            validation_results.append({
-                'valid': False,
-                'step': 'ca_postal_code_validation',
-                'incorrect_count': ca_postal_validation['incorrect_count'],
-                'total_records': ca_postal_validation['total_records'],
-                'download_file': download_file
-            })
+                
+                # Collect failed _temp_row_id values from incorrect records
+                if ca_zip_validation['incorrect_records'] is not None and '_temp_row_id' in ca_zip_validation['incorrect_records'].columns:
+                    # Convert back from string to int (since validation functions convert all columns to strings)
+                    temp_ids = ca_zip_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                    failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                    failed_ids = [x for x in failed_ids if x is not None]
+                    failed_row_ids.update(failed_ids)
+                    print(f"Collected {len(failed_ids)} failed row IDs from CA zip code validation: {failed_ids[:10]}")
+                
+                # Add failed validation to results but continue processing
+                validation_results.append({
+                    'valid': False,
+                    'step': 'ca_zip_code_validation',
+                    'incorrect_count': ca_zip_validation['incorrect_count'],
+                    'total_records': ca_zip_validation['total_records'],
+                    'download_file': download_file
+                })
         else:
-            print(f"CA postal code validation passed. All {ca_postal_validation['total_records']} Canadian postal codes are correctly formatted.")
+            print(f"CA zip code validation passed. All {ca_zip_validation['total_records']} Canadian zip codes are correctly formatted.")
             
-            # Add successful CA postal code validation to results
+            # Add successful CA zip code validation to results
             validation_results.append({
                 'valid': True,
-                'step': 'ca_postal_code_validation',
-                'total_records': ca_postal_validation['total_records']
+                'step': 'ca_zip_code_validation',
+                'total_records': ca_zip_validation['total_records']
             })
     
-    # US Postal Code Validation
-    print("Validating US postal codes...")
-    us_postal_validation = None
+    # US Zip Code Validation
+    print("Validating US zip codes...")
+    us_zip_validation = None
     try:
-        us_postal_validation = validate_us_postal_codes(completed, seller_name, is_sandbox)
+        us_zip_validation = validate_us_zip_codes(completed, seller_name, is_sandbox)
     except Exception as e:
-        print(f"Error during US postal code validation: {e}")
+        print(f"Error during US zip code validation: {e}")
         validation_results.append({
-            'valid': False,
-            'step': 'us_postal_code_validation',
-            'error': f'Validation error: {str(e)}',
-            'incorrect_count': 0,
-            'total_records': 0,
-            'download_file': None,
-            'autocorrectable_count': 0
+                'valid': False,
+            'step': 'us_zip_code_validation',
+                'error': f'Validation error: {str(e)}',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'download_file': None,
+                'autocorrectable_count': 0
         })
     
-    if us_postal_validation:
-        if not us_postal_validation['valid']:
-            print(f"US postal code validation failed. Found {us_postal_validation['incorrect_count']} incorrect formats.")
-            print(f"Of these, {us_postal_validation['autocorrectable_count']} can be autocorrected with leading zeros.")
-            
+    if us_zip_validation:
+        if not us_zip_validation['valid']:
+            print(f"US zip code validation failed. Found {us_zip_validation['incorrect_count']} incorrect formats.")
+            print(f"Of these, {us_zip_validation['autocorrectable_count']} can be autocorrected with leading zeros.")
+        
             # Check if autocorrect is requested
             autocorrected_count = 0
-            if autocorrect_us_postal and us_postal_validation['autocorrectable_count'] > 0:
-                print("Autocorrecting 4-digit US postal codes with leading zeros...")
+            if autocorrect_us_zip and us_zip_validation['autocorrectable_count'] > 0:
+                print("Autocorrecting 4-digit US zip codes with leading zeros...")
                 
-                # Find US records with 4-digit postal codes and add leading zero
+                # Find US records with 4-digit zip codes and add leading zero
                 us_records_mask = completed['address_country_code'] == 'US'
                 four_digit_mask = completed['address_postal_code'].astype(str).str.match(r'^\d{4}$')
                 
@@ -1619,14 +1628,14 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 completed.loc[us_records_mask & four_digit_mask, 'address_postal_code'] = \
                     completed.loc[us_records_mask & four_digit_mask, 'address_postal_code'].astype(str).str.zfill(5)
                 
-                print(f"Autocorrected {autocorrected_count} US postal codes.")
+                print(f"Autocorrected {autocorrected_count} US zip codes.")
                 
                 # Re-run US validation to check if all issues are resolved after autocorrecting
-                us_postal_validation = validate_us_postal_codes(completed, seller_name, is_sandbox)
+                us_zip_validation = validate_us_zip_codes(completed, seller_name, is_sandbox)
             
             # Save incorrect records to a file for download (whether autocorrected or not)
             download_file = None
-            if us_postal_validation and not us_postal_validation['valid'] and us_postal_validation['incorrect_records'] is not None:
+            if us_zip_validation and not us_zip_validation['valid'] and us_zip_validation['incorrect_records'] is not None:
                 try:
                     output_dir = 'outputs'
                     os.makedirs(output_dir, exist_ok=True)
@@ -1635,56 +1644,56 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     clean_seller_name = clean_seller_name.replace(' ', '_')
                     env_suffix = "_sandbox" if is_sandbox else "_production"
                     filename_suffix = "_after_autocorrect" if autocorrected_count > 0 else ""
-                    incorrect_filename = f"{clean_seller_name}_invalid_us_postal_codes{filename_suffix}{env_suffix}_{int(time.time())}.csv"
+                    incorrect_filename = f"{clean_seller_name}_invalid_us_zip_codes{filename_suffix}{env_suffix}_{int(time.time())}.csv"
                     incorrect_path = os.path.join(output_dir, incorrect_filename)
-                    us_postal_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                    us_zip_validation['incorrect_records'].to_csv(incorrect_path, index=False)
                     download_file = incorrect_filename
                     print(f"Saved incorrect records to: {incorrect_path}")
                 except Exception as e:
                     print(f"Error saving incorrect records file: {e}")
             
             # Add validation result (failed or passed after autocorrect)
-            if us_postal_validation and us_postal_validation['valid']:
-                print("US postal code validation passed after autocorrection.")
+            if us_zip_validation and us_zip_validation['valid']:
+                print("US zip code validation passed after autocorrection.")
                 validation_results.append({
                     'valid': True,
-                    'step': 'us_postal_code_validation',
-                    'total_records': us_postal_validation.get('total_records', 0),
+                    'step': 'us_zip_code_validation',
+                    'total_records': us_zip_validation.get('total_records', 0),
                     'autocorrected_count': int(autocorrected_count)
                 })
             else:
                 # Still have invalid codes (either no autocorrect or autocorrect didn't fix everything)
-                if us_postal_validation:
-                    print(f"US postal code validation failed. Found {us_postal_validation['incorrect_count']} incorrect formats.")
+                if us_zip_validation:
+                    print(f"US zip code validation failed. Found {us_zip_validation['incorrect_count']} incorrect formats.")
                     # Collect failed _temp_row_id values from incorrect records
-                    if us_postal_validation['incorrect_records'] is not None and '_temp_row_id' in us_postal_validation['incorrect_records'].columns:
+                    if us_zip_validation['incorrect_records'] is not None and '_temp_row_id' in us_zip_validation['incorrect_records'].columns:
                         # Convert back from string to int (since validation functions convert all columns to strings)
-                        temp_ids = us_postal_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                        temp_ids = us_zip_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
                         failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                         failed_ids = [x for x in failed_ids if x is not None]
                         failed_row_ids.update(failed_ids)
-                        print(f"Collected {len(failed_ids)} failed row IDs from US postal code validation: {failed_ids[:10]}")
+                        print(f"Collected {len(failed_ids)} failed row IDs from US zip code validation: {failed_ids[:10]}")
                 
                 # Add failed validation to results but continue processing
                 validation_results.append({
                     'valid': False,
-                    'step': 'us_postal_code_validation',
-                    'incorrect_count': us_postal_validation.get('incorrect_count', 0) if us_postal_validation else 0,
-                    'total_records': us_postal_validation.get('total_records', 0) if us_postal_validation else 0,
+                    'step': 'us_zip_code_validation',
+                    'incorrect_count': us_zip_validation.get('incorrect_count', 0) if us_zip_validation else 0,
+                    'total_records': us_zip_validation.get('total_records', 0) if us_zip_validation else 0,
                     'download_file': download_file,
-                    'autocorrectable_count': us_postal_validation.get('autocorrectable_count', 0) if us_postal_validation else 0,
+                    'autocorrectable_count': us_zip_validation.get('autocorrectable_count', 0) if us_zip_validation else 0,
                     'autocorrected_count': int(autocorrected_count)
                 })
         else:
-            print(f"US postal code validation passed. All {us_postal_validation['total_records']} US postal codes are correctly formatted.")
+            print(f"US zip code validation passed. All {us_zip_validation['total_records']} US zip codes are correctly formatted.")
             
-            # Add successful US postal code validation to results
-            validation_results.append({
-                'valid': True,
-                'step': 'us_postal_code_validation',
+            # Add successful US zip code validation to results
+    validation_results.append({
+        'valid': True,
+                'step': 'us_zip_code_validation',
                 'autocorrected_count': 0,  # No records autocorrected since validation passed without action
-                'total_records': us_postal_validation['total_records']
-            })
+                'total_records': us_zip_validation['total_records']
+    })
     
     print("Starting duplicate detection...")
     
@@ -1939,17 +1948,16 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             'message': f'Found {len(duplicate_card_ids_before_removal)} records with duplicate card IDs.'
         })
     
-    # Add no_tokens as a validation box
-    if len(no_tokens) > 0:
-        no_tokens_filename = f'{base_filename}_no_token_found.csv'
-        validation_results.append({
-            'valid': False,
-            'step': 'no_token_found',
-            'type': 'error',
-            'count': len(no_tokens),
-            'download_file': no_tokens_filename,
-            'message': f'Found {len(no_tokens)} records with no matching token in mapping file.'
-        })
+    # Add no_tokens as a validation box (always show, even if count is 0)
+    no_tokens_filename = f'{base_filename}_no_token_found.csv'
+    validation_results.append({
+        'valid': len(no_tokens) == 0,  # Valid if no records have missing tokens
+        'step': 'no_token_found',
+        'type': 'error' if len(no_tokens) > 0 else 'success',
+        'count': len(no_tokens),
+        'download_file': no_tokens_filename if len(no_tokens) > 0 else None,
+        'message': f'Found {len(no_tokens)} records with no matching token in mapping file.' if len(no_tokens) > 0 else 'All records have matching tokens in mapping file.'
+    })
     
     # Add successfully mapped records as a validation box
     if len(success) > 0:

@@ -57,8 +57,8 @@ def process_migration_api():
         vault_provider = request.form.get('vault_provider', '')
         is_sandbox = request.form.get('is_sandbox', 'false').lower() == 'true'
         provider = request.form.get('provider', 'stripe')
-        autocorrect_us_postal = request.form.get('autocorrect_us_postal', 'false').lower() == 'true'
-        use_mapping_postal_codes = request.form.get('use_mapping_postal_codes', 'false').lower() == 'true'
+        autocorrect_us_zip = request.form.get('autocorrect_us_zip', 'false').lower() == 'true'
+        use_mapping_zip_codes = request.form.get('use_mapping_zip_codes', 'false').lower() == 'true'
         proceed_without_missing_records = request.form.get('proceed_without_missing_records', 'false').lower() == 'true'
         
         # Validate files
@@ -98,8 +98,8 @@ def process_migration_api():
             is_sandbox, 
             provider, 
             seller_name,
-            autocorrect_us_postal,
-            use_mapping_postal_codes,
+            autocorrect_us_zip,
+            use_mapping_zip_codes,
             proceed_without_missing_records
         )
         
@@ -111,7 +111,7 @@ def process_migration_api():
             return jsonify(result)
         
         # Check if validation failed (old format: single validation failure)
-        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation', 'date_format_validation', 'date_validation', 'ca_postal_code_validation', 'us_postal_code_validation', 'missing_postal_code_validation']:
+        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation', 'date_format_validation', 'date_validation', 'ca_zip_code_validation', 'us_zip_code_validation', 'missing_zip_code_validation']:
             # Clean up uploaded files
             os.remove(subscriber_path)
             os.remove(mapping_path)
@@ -215,7 +215,7 @@ def continue_processing():
                 'message': 'Continuing with duplicates'
             })
         elif user_choice == 'autocorrect_leading_zeros':
-            # Autocorrect US postal codes with leading zeros
+            # Autocorrect US zip codes with leading zeros
             try:
                 # For now, return a simple response indicating autocorrect was requested
                 # The actual autocorrect logic should be handled in the main processing flow
@@ -225,15 +225,15 @@ def continue_processing():
                 })
             except Exception as e:
                 return jsonify({'error': f'Autocorrect failed: {str(e)}'}), 500
-        elif user_choice == 'use_mapping_postal_codes':
-            # Use mapping postal codes to fill missing postal codes
+        elif user_choice == 'use_mapping_zip_codes':
+            # Use mapping zip codes to fill missing zip codes
             try:
                 return jsonify({
-                    'status': 'mapping_postal_codes_requested',
-                    'message': 'Use mapping postal codes requested'
+                    'status': 'mapping_zip_codes_requested',
+                    'message': 'Use mapping zip codes requested'
                 })
             except Exception as e:
-                return jsonify({'error': f'Use mapping postal codes failed: {str(e)}'}), 500
+                return jsonify({'error': f'Use mapping zip codes failed: {str(e)}'}), 500
         elif user_choice == 'proceed_without_missing_records':
             # Proceed without missing records
             try:
@@ -283,7 +283,7 @@ def validate_zipcodes():
         
         issues = []
         
-        # Check each US postal code
+        # Check each US zip code
         for idx, row in df.iterrows():
             country_code = row.get('address_country_code', '')
             postal_code = row.get('address_postal_code', '')
