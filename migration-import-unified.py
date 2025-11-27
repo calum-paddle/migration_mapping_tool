@@ -481,23 +481,11 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
         
         # Convert all columns to strings to prevent float conversion in CSV
         if not invalid_zip_codes.empty:
-            print(f"DEBUG: CA validation - Found {len(invalid_zip_codes)} invalid records")
-            print(f"DEBUG: CA validation - DataFrame shape: {invalid_zip_codes.shape}")
-            print(f"DEBUG: CA validation - Column dtypes before conversion:")
-            for col in invalid_zip_codes.columns:
-                print(f"  {col}: {invalid_zip_codes[col].dtype}")
-                print(f"  Sample values: {invalid_zip_codes[col].head(3).tolist()}")
-            
             for col in invalid_zip_codes.columns:
                 # Handle NaN values and ensure all data is string
                 invalid_zip_codes[col] = invalid_zip_codes[col].fillna('').astype(str).replace('nan', '')
                 # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
                 invalid_zip_codes[col] = invalid_zip_codes[col].str.replace(r'\.0$', '', regex=True)
-            
-            print(f"DEBUG: CA validation - Column dtypes after conversion:")
-            for col in invalid_zip_codes.columns:
-                print(f"  {col}: {invalid_zip_codes[col].dtype}")
-                print(f"  Sample values: {invalid_zip_codes[col].head(3).tolist()}")
         
         return {
             'valid': len(invalid_zip_codes) == 0,
@@ -692,10 +680,10 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         print(f"Column validation passed. Found {validation_result['total_columns']} columns including {len(validation_result['optional_columns'])} optional columns.")
         # Add successful column validation to results
         validation_results.append({
-            'valid': True,
-            'step': 'column_validation',
-            'total_columns': validation_result['total_columns'],
-            'optional_columns': validation_result['optional_columns']
+        'valid': True,
+        'step': 'column_validation',
+        'total_columns': validation_result['total_columns'],
+        'optional_columns': validation_result['optional_columns']
         })
     
     # Bluesnap card token validation (only for Bluesnap provider)
@@ -815,7 +803,6 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                 failed_ids = [x for x in failed_ids if x is not None]
                 failed_row_ids.update(failed_ids)
-                print(f"Collected {len(failed_ids)} failed row IDs from date format validation: {failed_ids[:10]}")
             
             # Add failed validation to results but continue processing
             validation_results.append({
@@ -856,22 +843,22 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             
             # Save incorrect records to a file for download
             download_file = None
-            if date_validation['incorrect_records'] is not None:
-                try:
-                    output_dir = 'outputs'
-                    os.makedirs(output_dir, exist_ok=True)
-                    
-                    # Create filename with seller name and environment
-                    clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-                    clean_seller_name = clean_seller_name.replace(' ', '_')
-                    env_suffix = "_sandbox" if is_sandbox else "_production"
-                    incorrect_filename = f"{clean_seller_name}_invalid_date_periods{env_suffix}_{int(time.time())}.csv"
-                    incorrect_path = os.path.join(output_dir, incorrect_filename)
-                    date_validation['incorrect_records'].to_csv(incorrect_path, index=False)
-                    download_file = incorrect_filename
-                    print(f"Saved incorrect records to: {incorrect_path}")
-                except Exception as e:
-                    print(f"Error saving incorrect records file: {e}")
+        if date_validation['incorrect_records'] is not None:
+            try:
+                output_dir = 'outputs'
+                os.makedirs(output_dir, exist_ok=True)
+                
+                # Create filename with seller name and environment
+                clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                clean_seller_name = clean_seller_name.replace(' ', '_')
+                env_suffix = "_sandbox" if is_sandbox else "_production"
+                incorrect_filename = f"{clean_seller_name}_invalid_date_periods{env_suffix}_{int(time.time())}.csv"
+                incorrect_path = os.path.join(output_dir, incorrect_filename)
+                date_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                download_file = incorrect_filename
+                print(f"Saved incorrect records to: {incorrect_path}")
+            except Exception as e:
+                print(f"Error saving incorrect records file: {e}")
                 
                 # Collect failed _temp_row_id values from incorrect records
                 if date_validation['incorrect_records'] is not None and '_temp_row_id' in date_validation['incorrect_records'].columns:
@@ -880,12 +867,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                     failed_ids = [x for x in failed_ids if x is not None]
                     failed_row_ids.update(failed_ids)
-                    print(f"Collected {len(failed_ids)} failed row IDs from date period validation: {failed_ids[:10]}")
                 
                 # Add failed validation to results but continue processing
                 validation_results.append({
                     'valid': False,
-                    'step': 'date_validation',
+            'step': 'date_validation',
                     'incorrect_count': date_validation['incorrect_count'],
                     'total_records': date_validation['total_records'],
                     'download_file': download_file
@@ -893,11 +879,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         else:
             print(f"Date validation passed. All {date_validation['total_records']} date periods are valid.")
             # Add successful date validation to results
-            validation_results.append({
-                'valid': True,
-                'step': 'date_validation',
-                'total_records': date_validation['total_records']
-            })
+    validation_results.append({
+        'valid': True,
+        'step': 'date_validation',
+        'total_records': date_validation['total_records']
+    })
     
     # Provider-specific data processing
     if provider.lower() == 'bluesnap':
@@ -1043,16 +1029,13 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             
             # Get the missing records that can be fixed
             missing_records = missing_zip_validation['missing_records']
-            print(f"Missing records DataFrame columns: {missing_records.columns.tolist() if missing_records is not None else 'None'}")
             
             if missing_records is not None and len(missing_records) > 0:
                 # Determine the mapping column name based on provider
                 mapping_column = 'card.address_zip' if provider.lower() == 'stripe' else 'Zip Code'
-                print(f"Using mapping column: {mapping_column}")
                 
                 # Check if the mapping column exists in the merged data
                 if mapping_column not in completed.columns:
-                    print(f"Error: '{mapping_column}' column not found in merged data. Available columns: {completed.columns.tolist()}")
                     # Add error to validation results but continue processing
                     validation_results.append({
                             'valid': False,
@@ -1066,14 +1049,12 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 else:
                     # Update the main dataset with zip codes from mapping
                     updated_count = 0
-                    print(f"Missing records card_tokens: {missing_records['card_token'].tolist()}")
                     
                     # For each missing record, copy the zip code from the mapping column to address_postal_code
                     # Use the row index from missing_records (which corresponds to the row in completed)
                     for idx, row in missing_records.iterrows():
                         card_token = row['card_token']
                         mapping_zip_code = row[mapping_column]
-                        print(f"Processing row {idx}, card_token: {card_token}, mapping zip code: {mapping_zip_code}")
                         
                         if pd.notna(mapping_zip_code) and str(mapping_zip_code).strip() != '':
                             # Basic cleaning: convert to string and strip whitespace
@@ -1098,25 +1079,13 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                     digits_only = re.sub(r'\D', '', cleaned_zip_code)
                                     if digits_only:
                                         cleaned_zip_code = digits_only
-                                    
-                                    # Warn if US zip code is not in valid format
-                                    if len(cleaned_zip_code) == 4 and cleaned_zip_code.isdigit():
-                                        # 4-digit code - will be handled by autocorrect if needed
-                                        pass
-                                    elif len(cleaned_zip_code) != 5 or not cleaned_zip_code.isdigit():
-                                        print(f"Warning: US zip code '{cleaned_zip_code}' (from mapping: '{mapping_zip_code}') is not in valid format (5 digits or 4 digits).")
                                 
                                 # For non-US records, keep the zip code as-is (may contain letters, spaces, etc.)
                                 completed.loc[idx, 'address_postal_code'] = cleaned_zip_code
-                                updated_count += 1
-                                print(f"Updated row {idx} with zip code {cleaned_zip_code} (cleaned from {mapping_zip_code})")
-                            else:
-                                print(f"Row index {idx} not found in completed DataFrame")
-                        else:
-                            print(f"No valid zip code found in mapping for row {idx}, card_token: {card_token}")
-                    
+                            updated_count += 1
+                
                     print(f"Updated {updated_count} records with zip codes from mapping file.")
-                    
+                
                     # Re-run the missing zip code validation
                     try:
                         missing_zip_validation = validate_missing_zip_codes(completed, provider, seller_name, is_sandbox)
@@ -1169,7 +1138,6 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                 failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                                 failed_ids = [x for x in failed_ids if x is not None]
                                 failed_row_ids.update(failed_ids)
-                                print(f"Collected {len(failed_ids)} failed row IDs from missing zip code validation (after mapping update): {failed_ids[:10]}")
                             
                             validation_results.append({
                                 'valid': False,
@@ -1217,12 +1185,12 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 if missing_zip_validation['valid']:
                     print(f"Missing zip code validation passed after removing missing records. All {missing_zip_validation['total_records']} records have zip codes.")
                     # Add successful missing zip code validation to results
-                    validation_results.append({
-                        'valid': True,
+                validation_results.append({
+                    'valid': True,
                         'step': 'missing_zip_code_validation',
                         'total_records': missing_zip_validation['total_records']
-                    })
-                else:
+                })
+            else:
                     # Still have missing zip codes after removal - continue processing
                     print(f"Still have {missing_zip_validation['missing_count']} missing zip codes after removal.")
                     # Save error but continue
@@ -1248,7 +1216,6 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                         failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                         failed_ids = [x for x in failed_ids if x is not None]
                         failed_row_ids.update(failed_ids)
-                        print(f"Collected {len(failed_ids)} failed row IDs from missing zip code validation: {failed_ids[:10]}")
                     
                     validation_results.append({
                         'valid': False,
@@ -1302,8 +1269,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         print(f"Missing zip code validation passed. All {missing_zip_validation['total_records']} records have zip codes.")
         
         # Add successful missing zip code validation to results
-        validation_results.append({
-            'valid': True,
+    validation_results.append({
+        'valid': True,
             'step': 'missing_zip_code_validation',
             'total_records': missing_zip_validation['total_records'],
             'pulled_from_mapping_count': 0  # No records pulled since validation passed without action
@@ -1450,9 +1417,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     # Remove columns that exist in the dataframe
     columns_to_remove = [col for col in columns_to_remove if col in completed.columns]
-    print(f"Removing columns: {columns_to_remove}")
     completed = completed.drop(columns=columns_to_remove)
-    print(f"Shape after removing columns: {completed.shape}")
     
     # Reorder columns according to provider specification
     if provider.lower() == 'stripe':
@@ -1487,17 +1452,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             existing_columns.append('_temp_row_id')
         completed = completed[existing_columns]
     
-    print("Filtering rows with customer_email...")
-    print(f"Rows before email filtering: {len(completed)}")
     completed = completed[completed['customer_email'].notna()]
-    print(f"Rows after email filtering: {len(completed)}")
     
     # Detect duplicate emails BEFORE anonymization (so we can catch real duplicates)
     # Store this for later use - we'll use this directly for reporting
     duplicate_emails_before_anonymization = completed[completed.duplicated(subset='customer_email', keep=False)].copy()
-    print(f"Duplicate emails detected (before anonymization): {len(duplicate_emails_before_anonymization)}")
-    if len(duplicate_emails_before_anonymization) > 0:
-        print(f"Duplicate email values: {duplicate_emails_before_anonymization['customer_email'].value_counts().to_dict()}")
     
     # Sandbox-specific data anonymization
     if is_sandbox:
@@ -1544,8 +1503,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     if ca_zip_validation:
         if not ca_zip_validation['valid']:
             print(f"CA zip code validation failed. Found {ca_zip_validation['incorrect_count']} incorrect formats.")
-            
-            # Save incorrect records to a file for download
+        
+        # Save incorrect records to a file for download
             download_file = None
             if ca_zip_validation['incorrect_records'] is not None:
                 try:
@@ -1570,7 +1529,6 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                     failed_ids = [x for x in failed_ids if x is not None]
                     failed_row_ids.update(failed_ids)
-                    print(f"Collected {len(failed_ids)} failed row IDs from CA zip code validation: {failed_ids[:10]}")
                 
                 # Add failed validation to results but continue processing
                 validation_results.append({
@@ -1584,11 +1542,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             print(f"CA zip code validation passed. All {ca_zip_validation['total_records']} Canadian zip codes are correctly formatted.")
             
             # Add successful CA zip code validation to results
-            validation_results.append({
-                'valid': True,
+    validation_results.append({
+        'valid': True,
                 'step': 'ca_zip_code_validation',
                 'total_records': ca_zip_validation['total_records']
-            })
+    })
     
     # US Zip Code Validation
     print("Validating US zip codes...")
@@ -1612,7 +1570,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             print(f"US zip code validation failed. Found {us_zip_validation['incorrect_count']} incorrect formats.")
             print(f"Of these, {us_zip_validation['autocorrectable_count']} can be autocorrected with leading zeros.")
         
-            # Check if autocorrect is requested
+        # Check if autocorrect is requested
             autocorrected_count = 0
             if autocorrect_us_zip and us_zip_validation['autocorrectable_count'] > 0:
                 print("Autocorrecting 4-digit US zip codes with leading zeros...")
@@ -1672,7 +1630,6 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                         failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                         failed_ids = [x for x in failed_ids if x is not None]
                         failed_row_ids.update(failed_ids)
-                        print(f"Collected {len(failed_ids)} failed row IDs from US zip code validation: {failed_ids[:10]}")
                 
                 # Add failed validation to results but continue processing
                 validation_results.append({
@@ -1736,7 +1693,6 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         temp_ids = pd.to_numeric(no_tokens['_temp_row_id'], errors='coerce').dropna()
         failed_ids = [int(x) for x in temp_ids if pd.notna(x)]
         failed_row_ids.update(failed_ids)
-        print(f"Collected {len(failed_ids)} failed row IDs from no_tokens: {failed_ids[:10]}")
     
     # Remove all failed records from completed (records that failed any validation or have no token)
     if len(failed_row_ids) > 0:

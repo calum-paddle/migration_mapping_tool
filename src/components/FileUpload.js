@@ -118,10 +118,7 @@ const FileUpload = ({ onProcessingComplete }) => {
             timestamp: Date.now()
           }));
           setValidationResults(prev => [...prev, ...previousValidations]);
-          // Expand passed validations (but not warnings)
-          previousValidations.filter(v => v.valid && v.type !== 'warning').forEach(v => {
-            setExpandedValidations(prev => new Set([...prev, v.step]));
-          });
+          // All collapsible boxes start collapsed
         }
         
         // Add the validation that requires user input
@@ -131,10 +128,7 @@ const FileUpload = ({ onProcessingComplete }) => {
           timestamp: Date.now()
         };
         setValidationResults(prev => [...prev, newValidation]);
-        // Expand if it's a passed validation (but not a warning)
-        if (newValidation.valid && newValidation.type !== 'warning') {
-          setExpandedValidations(prev => new Set([...prev, newValidation.step]));
-        }
+        // All collapsible boxes start collapsed
         setWaitingForUserInput(true);
         setIsProcessing(false);
         setProcessingStatus('');
@@ -164,9 +158,9 @@ const FileUpload = ({ onProcessingComplete }) => {
             setZipFile(zipFileInfo);
           }
         }
-        // Initialize expanded state: expand passed validations (but not warnings), collapse failed ones and warnings
+        // Initialize expanded state: all collapsible boxes start collapsed except successfully mapped records
         const initialExpanded = new Set(
-          allValidations.filter(v => v.valid && v.type !== 'warning').map(v => v.step)
+          allValidations.filter(v => v.step === 'successfully_mapped_records').map(v => v.step)
         );
         setExpandedValidations(initialExpanded);
         setIsProcessing(false);
@@ -189,10 +183,7 @@ const FileUpload = ({ onProcessingComplete }) => {
             timestamp: Date.now()
           }));
           setValidationResults(prev => [...prev, ...previousValidations]);
-          // Expand passed validations (but not warnings)
-          previousValidations.filter(v => v.valid && v.type !== 'warning').forEach(v => {
-            setExpandedValidations(prev => new Set([...prev, v.step]));
-          });
+          // All collapsible boxes start collapsed
         }
         
         // Then add the failed validation (collapsed by default)
@@ -227,10 +218,11 @@ const FileUpload = ({ onProcessingComplete }) => {
             setZipFile(zipFileInfo);
           }
         }
-        // Expand passed validations (but not warnings)
-        newValidations.filter(v => v.valid && v.type !== 'warning').forEach(v => {
-          setExpandedValidations(prev => new Set([...prev, v.step]));
-        });
+        // All collapsible boxes start collapsed except successfully mapped records
+        const initialExpanded = new Set(
+          newValidations.filter(v => v.step === 'successfully_mapped_records').map(v => v.step)
+        );
+        setExpandedValidations(initialExpanded);
       }
       
       setIsProcessing(false);
@@ -674,7 +666,7 @@ const FileUpload = ({ onProcessingComplete }) => {
               <span className="user-input-required">❓</span>
             )}
           </div>
-          {(!isCollapsible || isExpanded) && !(validation.step === 'column_validation' && validation.valid) && (
+          {(!isCollapsible || isExpanded) && !(validation.step === 'column_validation' && validation.valid) && !(validation.step === 'us_zip_code_validation' && validation.valid && (!validation.autocorrected_count || validation.autocorrected_count === 0)) && (
           <div className="validation-details">
             {isWarning ? (
               <>
@@ -765,14 +757,11 @@ const FileUpload = ({ onProcessingComplete }) => {
                     </div>
                   </>
                 ) : (
-                  <>
-                    <p>US zip codes must be exactly 5 numerical digits.</p>
-                    {validation.autocorrected_count > 0 && (
-                      <div className="missing-columns">
-                        <p><strong>{validation.autocorrected_count} US zip codes were autocorrected with leading zeros.</strong></p>
-                      </div>
-                    )}
-                  </>
+                  validation.autocorrected_count > 0 ? (
+                    <div className="missing-columns">
+                      <p><strong>{validation.autocorrected_count} US zip codes were autocorrected with leading zeros.</strong></p>
+                    </div>
+                  ) : null
                 )}
               </>
             ) : validation.step === 'missing_zip_code_validation' ? (
