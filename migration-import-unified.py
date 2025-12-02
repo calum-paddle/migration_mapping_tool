@@ -1456,7 +1456,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     # Detect duplicate emails BEFORE anonymization (so we can catch real duplicates)
     # Store this for later use - we'll use this directly for reporting
-    duplicate_emails_before_anonymization = completed[completed.duplicated(subset='customer_email', keep=False)].copy()
+    # Skip duplicate email detection in sandbox mode since emails will be anonymized
+    if is_sandbox:
+        duplicate_emails_before_anonymization = pd.DataFrame()
+    else:
+        duplicate_emails_before_anonymization = completed[completed.duplicated(subset='customer_email', keep=False)].copy()
     
     # Sandbox-specific data anonymization
     if is_sandbox:
@@ -1728,30 +1732,29 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     duplicate_external_subscription_ids = duplicate_external_subscription_ids_before_removal
     print(f"Using duplicate detections from before removal for reporting")
     
-    # Use duplicate emails detected before anonymization
-    # We use the pre-anonymization detection because:
-    # 1. In sandbox, emails are anonymized so we can't detect duplicates after
-    # 2. In production, we want to show duplicates even if some records were removed due to validation failures
-    # Map the duplicate_emails_before_anonymization to current records using _temp_row_id
-    if len(duplicate_emails_before_anonymization) > 0 and '_temp_row_id' in duplicate_emails_before_anonymization.columns and '_temp_row_id' in completed.columns:
-        # Find records in completed that match the _temp_row_id from duplicate_emails_before_anonymization
-        # This gives us the duplicate records that are still in completed (not removed by validation)
-        duplicate_emails = completed[completed['_temp_row_id'].isin(duplicate_emails_before_anonymization['_temp_row_id'])]
-        print(f"Duplicate emails records (mapped to current records): {len(duplicate_emails)}")
+    # Duplicate email detection - skip in sandbox mode since emails are anonymized
+    if is_sandbox:
+        # In sandbox, emails are anonymized so duplicate detection doesn't make sense
+        duplicate_emails = pd.DataFrame()
+        duplicate_emails_for_report = pd.DataFrame()
     else:
-        # Fallback: try to detect again (only works in production, not sandbox)
-        if not is_sandbox:
+        # In production, detect duplicate emails
+        # We use the pre-anonymization detection because we want to show duplicates even if some records were removed due to validation failures
+        # Map the duplicate_emails_before_anonymization to current records using _temp_row_id
+        if len(duplicate_emails_before_anonymization) > 0 and '_temp_row_id' in duplicate_emails_before_anonymization.columns and '_temp_row_id' in completed.columns:
+            # Find records in completed that match the _temp_row_id from duplicate_emails_before_anonymization
+            # This gives us the duplicate records that are still in completed (not removed by validation)
+            duplicate_emails = completed[completed['_temp_row_id'].isin(duplicate_emails_before_anonymization['_temp_row_id'])]
+            print(f"Duplicate emails records (mapped to current records): {len(duplicate_emails)}")
+        else:
+            # Fallback: try to detect again
             duplicate_emails = completed[completed.duplicated(subset='customer_email', keep=False)]
             print(f"Duplicate emails records (detected after validation): {len(duplicate_emails)}")
-        else:
-            # In sandbox, if we can't map, create empty DataFrame
-            duplicate_emails = pd.DataFrame()
-            print(f"Duplicate emails records: 0 (could not map pre-anonymization duplicates)")
-    
-    # For reporting purposes, we want to show ALL duplicates that were detected before anonymization
-    # even if some were removed due to validation failures
-    # So we'll use duplicate_emails_before_anonymization for the report file
-    duplicate_emails_for_report = duplicate_emails_before_anonymization.copy()
+        
+        # For reporting purposes, we want to show ALL duplicates that were detected before anonymization
+        # even if some were removed due to validation failures
+        # So we'll use duplicate_emails_before_anonymization for the report file
+        duplicate_emails_for_report = duplicate_emails_before_anonymization.copy()
     
     # Generate output filenames
     if seller_name:
