@@ -143,6 +143,96 @@ def validate_bluesnap_card_tokens(subscriber_data, seller_name='', is_sandbox=Fa
             'download_file': None
         }
 
+def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=False):
+    """
+    Validate that address_country_code does not contain unsupported countries.
+    
+    Args:
+        subscriber_data: DataFrame containing subscriber data
+        seller_name: Name of the seller for file naming
+        is_sandbox: Boolean indicating if this is sandbox mode
+    
+    Returns:
+        dict: Validation results with status and incorrect records
+    """
+    try:
+        # Dictionary of unsupported country codes with their flag emojis
+        unsupported_countries_dict = {
+            'AF': '🇦🇫', 'AQ': '🇦🇶', 'BY': '🇧🇾', 'MM': '🇲🇲', 'CF': '🇨🇫', 'CU': '🇨🇺', 
+            'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
+            'NI': '🇳🇮', 'KP': '🇰🇵', 'RU': '🇷🇺', 'SO': '🇸🇴', 'SS': '🇸🇸', 'SD': '🇸🇩', 
+            'SY': '🇸🇾', 'VE': '🇻🇪', 'YE': '🇾🇪', 'ZW': '🇿🇼'
+        }
+        # List of unsupported country codes (for validation logic)
+        unsupported_countries = list(unsupported_countries_dict.keys())
+        
+        # Create a copy to avoid modifying original
+        validation_data = subscriber_data.copy()
+        
+        # Ensure _temp_row_id exists
+        if '_temp_row_id' not in validation_data.columns:
+            validation_data['_temp_row_id'] = range(len(validation_data))
+        
+        # Check if address_country_code column exists
+        if 'address_country_code' not in validation_data.columns:
+            return {
+                'valid': True,  # If column doesn't exist, consider it valid (will be caught by column validation)
+                'incorrect_count': 0,
+                'total_records': len(validation_data),
+                'incorrect_records': None
+            }
+        
+        # Find records with unsupported country codes
+        unsupported_mask = validation_data['address_country_code'].isin(unsupported_countries)
+        incorrect_records = validation_data[unsupported_mask].copy()
+        
+        # Convert all columns to strings to prevent float conversion in CSV
+        if not incorrect_records.empty:
+            for col in incorrect_records.columns:
+                # Handle NaN values and ensure all data is string
+                incorrect_records[col] = incorrect_records[col].fillna('').astype(str).replace('nan', '')
+                # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
+                incorrect_records[col] = incorrect_records[col].str.replace(r'\.0$', '', regex=True)
+        
+        incorrect_count = len(incorrect_records)
+        total_records = len(validation_data)
+        
+        if incorrect_count > 0:
+            return {
+                'valid': False,
+                'incorrect_count': incorrect_count,
+                'total_records': total_records,
+                'incorrect_records': incorrect_records,
+                'unsupported_countries': unsupported_countries,
+                'unsupported_countries_dict': unsupported_countries_dict
+            }
+        else:
+            return {
+                'valid': True,
+                'incorrect_count': 0,
+                'total_records': total_records,
+                'incorrect_records': None,
+                'unsupported_countries': unsupported_countries,
+                'unsupported_countries_dict': unsupported_countries_dict
+            }
+    except Exception as e:
+            # Fallback dictionary if error occurs
+            fallback_dict = {
+                'AF': '🇦🇫', 'AQ': '🇦🇶', 'BY': '🇧🇾', 'MM': '🇲🇲', 'CF': '🇨🇫', 'CU': '🇨🇺', 
+                'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
+                'NI': '🇳🇮', 'KP': '🇰🇵', 'RU': '🇷🇺', 'SO': '🇸🇴', 'SS': '🇸🇸', 'SD': '🇸🇩', 
+                'SY': '🇸🇾', 'VE': '🇻🇪', 'YE': '🇾🇪', 'ZW': '🇿🇼'
+            }
+            return {
+                'valid': False,
+                'incorrect_count': 0,
+                'total_records': 0,
+                'incorrect_records': None,
+                'error': f'Validation error: {str(e)}',
+                'unsupported_countries': list(fallback_dict.keys()),
+                'unsupported_countries_dict': fallback_dict
+            }
+
 def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
     """
     Validate that current_period_started_at and current_period_ends_at dates are in the correct format
@@ -344,8 +434,13 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
     Validate missing zip codes for specific countries and check if they can be filled from mapping file
     """
     try:
-        # Countries that require zip codes
-        required_countries = ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US']
+        # Dictionary of required country codes with their flag emojis
+        required_countries_dict = {
+            'AU': '🇦🇺', 'CA': '🇨🇦', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IN': '🇮🇳', 
+            'IT': '🇮🇹', 'NL': '🇳🇱', 'ES': '🇪🇸', 'GB': '🇬🇧', 'US': '🇺🇸'
+        }
+        # List of required country codes (for validation logic)
+        required_countries = list(required_countries_dict.keys())
         
         # Filter for records from required countries
         required_records = data[data['address_country_code'].isin(required_countries)].copy()
@@ -356,7 +451,9 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
                 'missing_count': 0,
                 'total_records': 0,
                 'available_from_mapping': 0,
-                'missing_records': None
+                'missing_records': None,
+                'required_countries': required_countries,
+                'required_countries_dict': required_countries_dict
             }
         
         # Find records with missing zip codes
@@ -375,7 +472,9 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
                 'missing_count': 0,
                 'total_records': total_records_count,
                 'available_from_mapping': 0,
-                'missing_records': None
+                'missing_records': None,
+                'required_countries': required_countries,
+                'required_countries_dict': required_countries_dict
             }
         
         # Check mapping file column name based on provider
@@ -411,7 +510,9 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
             'missing_count': missing_count,
             'total_records': total_records_count,
             'available_from_mapping': available_count,
-            'missing_records': missing_zip_codes
+            'missing_records': missing_zip_codes,
+            'required_countries': required_countries,
+            'required_countries_dict': required_countries_dict
         }
         
     except Exception as e:
@@ -425,7 +526,12 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
             'missing_count': 0,  # Can't preserve count if exception occurs before calculation
             'total_records': 0,
             'available_from_mapping': 0,
-            'missing_records': None
+            'missing_records': None,
+            'required_countries': ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US'],  # Fallback if error occurs
+            'required_countries_dict': {
+                'AU': '🇦🇺', 'CA': '🇨🇦', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IN': '🇮🇳', 
+                'IT': '🇮🇹', 'NL': '🇳🇱', 'ES': '🇪🇸', 'GB': '🇬🇧', 'US': '🇺🇸'
+            }  # Fallback if error occurs
         }
 
 def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
@@ -686,6 +792,84 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         'optional_columns': validation_result['optional_columns']
         })
     
+    # Unsupported Countries Validation
+    print("Validating unsupported countries...")
+    # Ensure _temp_row_id exists for tracking (it should already be added at line 710)
+    unsupported_countries_validation = None
+    try:
+        unsupported_countries_validation = validate_unsupported_countries(subscribedata, seller_name, is_sandbox)
+    except Exception as e:
+        print(f"Error during unsupported countries validation: {e}")
+        # Fallback dictionary if error occurs
+        fallback_dict = {
+            'AF': '🇦🇫', 'AQ': '🇦🇶', 'BY': '🇧🇾', 'MM': '🇲🇲', 'CF': '🇨🇫', 'CU': '🇨🇺', 
+            'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
+            'NI': '🇳🇮', 'KP': '🇰🇵', 'RU': '🇷🇺', 'SO': '🇸🇴', 'SS': '🇸🇸', 'SD': '🇸🇩', 
+            'SY': '🇸🇾', 'VE': '🇻🇪', 'YE': '🇾🇪', 'ZW': '🇿🇼'
+        }
+        validation_results.append({
+            'valid': False,
+            'step': 'unsupported_countries_validation',
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'download_file': None,
+            'unsupported_countries': list(fallback_dict.keys()),
+            'unsupported_countries_dict': fallback_dict
+        })
+    
+    if unsupported_countries_validation:
+        if not unsupported_countries_validation['valid']:
+            print(f"Unsupported countries validation failed. Found {unsupported_countries_validation['incorrect_count']} records with unsupported country codes.")
+            
+            # Save incorrect records to a file for download
+            download_file = None
+            if unsupported_countries_validation['incorrect_records'] is not None:
+                try:
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    
+                    # Create filename with seller name and environment
+                    clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = "_sandbox" if is_sandbox else "_production"
+                    incorrect_filename = f"{clean_seller_name}_unsupported_countries{env_suffix}_{int(time.time())}.csv"
+                    incorrect_path = os.path.join(output_dir, incorrect_filename)
+                    unsupported_countries_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                    download_file = incorrect_filename
+                    print(f"Saved incorrect records to: {incorrect_path}")
+                except Exception as e:
+                    print(f"Error saving incorrect records file: {e}")
+            
+            # Collect failed _temp_row_id values from incorrect records
+            if unsupported_countries_validation['incorrect_records'] is not None and '_temp_row_id' in unsupported_countries_validation['incorrect_records'].columns:
+                # Convert back from string to int (since validation functions convert all columns to strings)
+                temp_ids = unsupported_countries_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                failed_ids = [x for x in failed_ids if x is not None]
+                failed_row_ids.update(failed_ids)
+            
+            # Add failed validation to results but continue processing
+            validation_results.append({
+                'valid': False,
+                'step': 'unsupported_countries_validation',
+                'incorrect_count': unsupported_countries_validation['incorrect_count'],
+                'total_records': unsupported_countries_validation['total_records'],
+                'download_file': download_file,
+                'unsupported_countries': unsupported_countries_validation.get('unsupported_countries', []),
+                'unsupported_countries_dict': unsupported_countries_validation.get('unsupported_countries_dict', {})
+            })
+        else:
+            print(f"Unsupported countries validation passed. All {unsupported_countries_validation['total_records']} records have supported country codes.")
+            # Add successful unsupported countries validation to results
+            validation_results.append({
+                'valid': True,
+                'step': 'unsupported_countries_validation',
+                'total_records': unsupported_countries_validation['total_records'],
+                'unsupported_countries': unsupported_countries_validation.get('unsupported_countries', []),
+                'unsupported_countries_dict': unsupported_countries_validation.get('unsupported_countries_dict', {})
+            })
+    
     # Bluesnap card token validation (only for Bluesnap provider)
     # COMMENTED OUT: Skipping card token length validation
     # if provider.lower() == 'bluesnap':
@@ -879,7 +1063,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         else:
             print(f"Date validation passed. All {date_validation['total_records']} date periods are valid.")
             # Add successful date validation to results
-    validation_results.append({
+            validation_results.append({
         'valid': True,
         'step': 'date_validation',
         'total_records': date_validation['total_records']
@@ -1098,7 +1282,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                             'missing_count': 0,
                             'total_records': 0,
                             'available_from_mapping': 0,
-                            'download_file': None
+                            'download_file': None,
+                            'required_countries': ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US']  # Fallback
                         })
                         missing_zip_validation = None
                     
@@ -1110,7 +1295,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                 'valid': True,
                                 'step': 'missing_zip_code_validation',
                                 'total_records': missing_zip_validation['total_records'],
-                                'pulled_from_mapping_count': updated_count
+                                'pulled_from_mapping_count': updated_count,
+                                'required_countries': missing_zip_validation.get('required_countries', []),
+                                'required_countries_dict': missing_zip_validation.get('required_countries_dict', {})
                             })
                         else:
                             # Still have missing zip codes after update - continue processing
@@ -1146,7 +1333,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                 'total_records': missing_zip_validation['total_records'],
                                 'available_from_mapping': missing_zip_validation.get('available_from_mapping', 0),
                                 'pulled_from_mapping_count': updated_count,
-                                'download_file': download_file
+                                'download_file': download_file,
+                                'required_countries': missing_zip_validation.get('required_countries', []),
+                                'required_countries_dict': missing_zip_validation.get('required_countries_dict', {})
                             })
             else:
                 print("No missing records found to update.")
@@ -1177,7 +1366,12 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                         'missing_count': 0,
                         'total_records': 0,
                         'available_from_mapping': 0,
-                        'download_file': None
+                    'download_file': None,
+                    'required_countries': ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US'],  # Fallback
+                    'required_countries_dict': {
+                        'AU': '🇦🇺', 'CA': '🇨🇦', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IN': '🇮🇳', 
+                        'IT': '🇮🇹', 'NL': '🇳🇱', 'ES': '🇪🇸', 'GB': '🇬🇧', 'US': '🇺🇸'
+                    }  # Fallback
                 })
                 missing_zip_validation = None
             
@@ -1188,7 +1382,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 validation_results.append({
                     'valid': True,
                         'step': 'missing_zip_code_validation',
-                        'total_records': missing_zip_validation['total_records']
+                        'total_records': missing_zip_validation['total_records'],
+                        'required_countries': missing_zip_validation.get('required_countries', []),
+                        'required_countries_dict': missing_zip_validation.get('required_countries_dict', {})
                 })
             else:
                     # Still have missing zip codes after removal - continue processing
@@ -1223,7 +1419,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                         'missing_count': missing_zip_validation['missing_count'],
                         'total_records': missing_zip_validation['total_records'],
                         'available_from_mapping': missing_zip_validation.get('available_from_mapping', 0),
-                        'download_file': download_file
+                        'download_file': download_file,
+                        'required_countries': missing_zip_validation.get('required_countries', []),
+                        'required_countries_dict': missing_zip_validation.get('required_countries_dict', {})
                     })
         
         else:
@@ -1263,7 +1461,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 'total_records': missing_zip_validation['total_records'],
                 'available_from_mapping': missing_zip_validation['available_from_mapping'],
                 'pulled_from_mapping_count': 0,  # No records pulled since checkbox not checked
-                'download_file': download_file
+                'download_file': download_file,
+                'required_countries': missing_zip_validation.get('required_countries', []),
+                'required_countries_dict': missing_zip_validation.get('required_countries_dict', {})
             })
     else:
         print(f"Missing zip code validation passed. All {missing_zip_validation['total_records']} records have zip codes.")
@@ -1273,7 +1473,9 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         'valid': True,
             'step': 'missing_zip_code_validation',
             'total_records': missing_zip_validation['total_records'],
-            'pulled_from_mapping_count': 0  # No records pulled since validation passed without action
+            'pulled_from_mapping_count': 0,  # No records pulled since validation passed without action
+            'required_countries': missing_zip_validation.get('required_countries', []),
+            'required_countries_dict': missing_zip_validation.get('required_countries_dict', {})
     })
     
     # Provider-specific column removal and ordering
@@ -1578,7 +1780,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             autocorrected_count = 0
             if autocorrect_us_zip and us_zip_validation['autocorrectable_count'] > 0:
                 print("Autocorrecting 4-digit US zip codes with leading zeros...")
-                
+            
                 # Find US records with 4-digit zip codes and add leading zero
                 us_records_mask = completed['address_country_code'] == 'US'
                 four_digit_mask = completed['address_postal_code'].astype(str).str.match(r'^\d{4}$')
@@ -1612,7 +1814,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     download_file = incorrect_filename
                     print(f"Saved incorrect records to: {incorrect_path}")
                 except Exception as e:
-                    print(f"Error saving incorrect records file: {e}")
+                        print(f"Error saving incorrect records file: {e}")
             
             # Add validation result (failed or passed after autocorrect)
             if us_zip_validation and us_zip_validation['valid']:

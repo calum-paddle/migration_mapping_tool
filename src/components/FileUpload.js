@@ -14,7 +14,6 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [mappingRecordCount, setMappingRecordCount] = useState(0);
   const [validationResults, setValidationResults] = useState([]);
   const [currentValidationStep, setCurrentValidationStep] = useState('');
-  const [waitingForUserInput, setWaitingForUserInput] = useState(false);
   const [expandedValidations, setExpandedValidations] = useState(new Set());
   const [zipFile, setZipFile] = useState(null);
   const [useMappingZipCodes, setUseMappingZipCodes] = useState(false);
@@ -129,7 +128,6 @@ const FileUpload = ({ onProcessingComplete }) => {
         };
         setValidationResults(prev => [...prev, newValidation]);
         // All collapsible boxes start collapsed
-        setWaitingForUserInput(true);
         setIsProcessing(false);
         setProcessingStatus('');
         setCurrentValidationStep('');
@@ -175,7 +173,7 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
       
       // Check if validation failed (old format: single validation failure)
-      if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation' || result.step === 'date_format_validation' || result.step === 'date_validation' || result.step === 'ca_zip_code_validation' || result.step === 'us_zip_code_validation' || result.step === 'missing_zip_code_validation')) {
+      if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation' || result.step === 'date_format_validation' || result.step === 'date_validation' || result.step === 'unsupported_countries_validation' || result.step === 'ca_zip_code_validation' || result.step === 'us_zip_code_validation' || result.step === 'missing_zip_code_validation')) {
         // Add any previous successful validations first
         if (result.validation_results) {
           const previousValidations = result.validation_results.map(validation => ({
@@ -245,7 +243,6 @@ const FileUpload = ({ onProcessingComplete }) => {
     setError(null);
     setProcessingStatus('');
     setCurrentValidationStep('');
-    setWaitingForUserInput(false);
     setZipFile(null);
   };
 
@@ -257,7 +254,6 @@ const FileUpload = ({ onProcessingComplete }) => {
       if (step === 'us_zip_code_validation' && userChoice === 'cancel') {
         setProcessingStatus('Processing stopped by user request');
         setIsProcessing(false);
-        setWaitingForUserInput(false);
         // Remove the user input requirement by setting autocorrectable_count to 0
         setValidationResults(prev => prev.map(validation => 
           validation.step === 'us_zip_code_validation' && !validation.valid
@@ -270,7 +266,6 @@ const FileUpload = ({ onProcessingComplete }) => {
       if (step === 'missing_zip_code_validation' && userChoice === 'cancel') {
         setProcessingStatus('Processing stopped by user request');
         setIsProcessing(false);
-        setWaitingForUserInput(false);
         // Remove the user input requirement by setting show_buttons to false
         setValidationResults(prev => prev.map(validation => 
           validation.step === 'missing_zip_code_validation' && !validation.valid
@@ -300,20 +295,17 @@ const FileUpload = ({ onProcessingComplete }) => {
       if (result.status === 'stopped_by_user') {
         setProcessingStatus('Processing stopped by user request');
         setIsProcessing(false);
-        setWaitingForUserInput(false);
       } else if (result.status === 'continuing') {
         // Continue with processing - you would call the migration function again here
         setProcessingStatus('Continuing with processing...');
         // For now, just show success
         setProcessingStatus('Processing completed successfully!');
         setIsProcessing(false);
-        setWaitingForUserInput(false);
       } else if (result.status === 'proceed_without_missing_records_requested') {
         // Restart processing with proceed without missing records flag
         setProcessingStatus('Restarting processing without missing records...');
         // Reset validation results to start fresh
         setValidationResults([]);
-        setWaitingForUserInput(false);
         
         // Restart the processing without missing records
         await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, false, false, true);
@@ -322,7 +314,6 @@ const FileUpload = ({ onProcessingComplete }) => {
     } catch (err) {
       setError('Error processing user choice: ' + err.message);
       setIsProcessing(false);
-      setWaitingForUserInput(false);
       
       // Scroll to bottom to show error message
       setTimeout(() => {
@@ -626,8 +617,19 @@ const FileUpload = ({ onProcessingComplete }) => {
                 ? (validation.valid ? 'Canadian zip code validation passed' : `Canadian zip code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'us_zip_code_validation'
                 ? (validation.valid ? 'US zip code validation passed' : `US zip code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                : validation.step === 'unsupported_countries_validation'
+                ? (validation.valid ? 'Unsupported countries validation passed' : `Unsupported countries validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'missing_zip_code_validation'
-                ? (validation.valid ? 'Missing zip code validation passed   🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸' : `Missing zip code validation failed   🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸${validation.missing_count !== undefined ? ` (${validation.missing_count})` : ''}`)
+                ? (() => {
+                    const countriesDict = validation.required_countries_dict || {
+                      'AU': '🇦🇺', 'CA': '🇨🇦', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IN': '🇮🇳', 
+                      'IT': '🇮🇹', 'NL': '🇳🇱', 'ES': '🇪🇸', 'GB': '🇬🇧', 'US': '🇺🇸'
+                    };
+                    const flags = Object.values(countriesDict).join(' ');
+                    return validation.valid 
+                      ? `Missing zip code validation passed   ${flags}` 
+                      : `Missing zip code validation failed   ${flags}${validation.missing_count !== undefined ? ` (${validation.missing_count})` : ''}`;
+                  })()
                 : validation.step === 'duplicate_tokens'
                 ? `Duplicate card tokens detected (${validation.count})`
                 : validation.step === 'duplicate_external_subscription_ids'
@@ -666,7 +668,15 @@ const FileUpload = ({ onProcessingComplete }) => {
               <span className="user-input-required">❓</span>
             )}
           </div>
-          {(!isCollapsible || isExpanded) && !(validation.step === 'column_validation' && validation.valid) && !(validation.step === 'us_zip_code_validation' && validation.valid && (!validation.autocorrected_count || validation.autocorrected_count === 0)) && (
+          {(!isCollapsible || isExpanded) && 
+           !(validation.step === 'column_validation' && validation.valid) && 
+           !(validation.step === 'date_format_validation' && validation.valid) &&
+           !(validation.step === 'date_validation' && validation.valid) &&
+           !(validation.step === 'card_token_validation' && validation.valid) &&
+           !(validation.step === 'ca_zip_code_validation' && validation.valid) &&
+           !(validation.step === 'unsupported_countries_validation' && validation.valid) &&
+           !(validation.step === 'us_zip_code_validation' && validation.valid && (!validation.autocorrected_count || validation.autocorrected_count === 0)) &&
+           !(validation.step === 'missing_zip_code_validation' && validation.valid && (!validation.pulled_from_mapping_count || validation.pulled_from_mapping_count === 0)) && (
           <div className="validation-details">
             {isWarning ? (
               <>
@@ -743,6 +753,19 @@ const FileUpload = ({ onProcessingComplete }) => {
                   </>
                 )}
               </>
+            ) : validation.step === 'unsupported_countries_validation' ? (
+              <>
+                {!validation.valid && (
+                  <>
+                    <p>Records with unsupported country codes are not allowed. The following countries are not supported: {validation.unsupported_countries ? validation.unsupported_countries.join(', ') : 'AF, AQ, BY, MM, CF, CU, CD, HT, IR, LY, ML, AN, NI, KP, RU, SO, SS, SD, SY, VE, YE, ZW'}.</p>
+                    <p>{validation.unsupported_countries_dict ? Object.values(validation.unsupported_countries_dict).join(' ') : '🇦🇫 🇦🇶 🇧🇾 🇲🇲 🇨🇫 🇨🇺 🇨🇩 🇭🇹 🇮🇷 🇱🇾 🇲🇱 🇳🇮 🇰🇵 🇷🇺 🇸🇴 🇸🇸 🇸🇩 🇸🇾 🇻🇪 🇾🇪 🇿🇼'}</p>
+                    <div className="missing-columns">
+                      <p><strong>Found {validation.incorrect_count} records with unsupported country codes.</strong></p>
+                      <p>Click the download icon to get a report of all incorrect records.</p>
+                    </div>
+                  </>
+                )}
+              </>
             ) : validation.step === 'us_zip_code_validation' ? (
               <>
                 {!validation.valid ? (
@@ -768,7 +791,12 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid ? (
                   <>
-                    <p>Zip codes are required for AU, CA, FR, DE, IN, IT, NL, ES, GB, US addresses.</p>
+                    <p>Zip codes are required for {validation.required_countries ? validation.required_countries.join(', ') : 'AU, CA, FR, DE, IN, IT, NL, ES, GB, US'} addresses.</p>
+                    {validation.required_countries && validation.required_countries.length > 0 && (
+                      <p>
+                        {validation.required_countries_dict ? Object.values(validation.required_countries_dict).join(' ') : '🇦🇺 🇨🇦 🇫🇷 🇩🇪 🇮🇳 🇮🇹 🇳🇱 🇪🇸 🇬🇧 🇺🇸'}
+                      </p>
+                    )}
                     <div className="missing-columns">
                       <p><strong>Found {validation.missing_count} records with missing zip codes.</strong></p>
                       {validation.pulled_from_mapping_count > 0 && (
@@ -778,14 +806,11 @@ const FileUpload = ({ onProcessingComplete }) => {
                     </div>
                   </>
                 ) : (
-                  <>
-                    <p>Zip codes are required for AU, CA, FR, DE, IN, IT, NL, ES, GB, US addresses.</p>
-                    {validation.pulled_from_mapping_count > 0 && (
-                      <div className="missing-columns">
-                        <p><strong>{validation.pulled_from_mapping_count} zip codes were pulled from the mapping file.</strong></p>
-                      </div>
-                    )}
-                  </>
+                  validation.pulled_from_mapping_count > 0 ? (
+                    <div className="missing-columns">
+                      <p><strong>{validation.pulled_from_mapping_count} zip codes were pulled from the mapping file.</strong></p>
+                    </div>
+                  ) : null
                 )}
               </>
             ) : validation.step === 'duplicate_detection' ? (

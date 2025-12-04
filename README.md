@@ -176,6 +176,56 @@ The migration process performs comprehensive validation checks:
 
 All validation results are displayed on a single page with downloadable error reports. A "Download All Reports" button provides a zip file containing all validation failures, duplicate warnings, no token found records, and successfully mapped records.
 
+## Configuration
+
+### Modifying Unsupported Countries
+
+To change the list of unsupported countries that will cause validation to fail, edit the `unsupported_countries_dict` dictionary in the `validate_unsupported_countries()` function in `migration-import-unified.py`.
+
+**Location**: `migration-import-unified.py`, line ~160
+
+**Example**:
+```python
+unsupported_countries_dict = {
+    'AF': '🇦🇫', 'AQ': '🇦🇶', 'BY': '🇧🇾', 'MM': '🇲🇲', 'CF': '🇨🇫', 'CU': '🇨🇺', 
+    'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
+    'NI': '🇳🇮', 'KP': '🇰🇵', 'RU': '🇷🇺', 'SO': '🇸🇴', 'SS': '🇸🇸', 'SD': '🇸🇩', 
+    'SY': '🇸🇾', 'VE': '🇻🇪', 'YE': '🇾🇪', 'ZW': '🇿🇼'
+}
+```
+
+**To add a new unsupported country**:
+1. Add a new key-value pair: `'XX': '🇽🇽'` (where `XX` is the ISO country code and `🇽🇽` is the flag emoji)
+2. The country code will automatically be used for validation
+3. The flag will automatically appear in the frontend validation display
+
+**To remove a country**:
+1. Simply delete the key-value pair from the dictionary
+
+### Modifying Required Zip Code Countries
+
+To change the list of countries that require zip codes, edit the `required_countries_dict` dictionary in the `validate_missing_zip_codes()` function in `migration-import-unified.py`.
+
+**Location**: `migration-import-unified.py`, line ~438
+
+**Example**:
+```python
+required_countries_dict = {
+    'AU': '🇦🇺', 'CA': '🇨🇦', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IN': '🇮🇳', 
+    'IT': '🇮🇹', 'NL': '🇳🇱', 'ES': '🇪🇸', 'GB': '🇬🇧', 'US': '🇺🇸'
+}
+```
+
+**To add a new required zip code country**:
+1. Add a new key-value pair: `'XX': '🇽🇽'` (where `XX` is the ISO country code and `🇽🇽` is the flag emoji)
+2. Records from this country will be validated for missing zip codes
+3. The flag will automatically appear in the frontend validation display
+
+**To remove a country**:
+1. Simply delete the key-value pair from the dictionary
+
+**Note**: Both dictionaries use the format `'COUNTRY_CODE': 'FLAG_EMOJI'`. The country codes are automatically extracted from the dictionary keys for validation logic, and the flags are sent to the frontend for display. No additional changes are needed in the frontend code.
+
 ## Output Files
 
 The migration process generates several CSV files:
