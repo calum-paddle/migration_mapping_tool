@@ -11,10 +11,12 @@ A React-based frontend application for migrating data from Stripe or Bluesnap to
 - **Data Processing**: Unified Python backend for data migration
 - **Duplicate Detection**: Comprehensive duplicate detection across multiple fields (tokens, card IDs, subscription IDs, emails)
 - **Data Anonymization**: Automatic email anonymization for sandbox mode
-- **Comprehensive Validation**: Column, date format, date period, and zip code validation with downloadable error reports
-- **Zip Code Handling**: Options to use mapping file zip codes and autocorrect US zip codes with leading zeros
-- **Results Summary**: Detailed processing results and statistics
-- **File Downloads**: Easy download of processed output files
+- **Comprehensive Validation**: Column, unsupported countries, date format, date period, and zip code validation with downloadable error reports
+- **Zip Code Handling**: Options to use mapping file zip codes and autocorrect US zip codes with leading zeros via checkboxes
+- **Collapsible UI**: Validation boxes can be collapsed/expanded for better organization
+- **Results Summary**: Detailed processing results and statistics displayed on a single page
+- **File Downloads**: Easy download of individual reports or all reports in a zip file
+- **Large File Support**: Supports files up to 2GB (approximately 1 million records)
 
 ## Project Structure
 
@@ -163,18 +165,32 @@ This will start both the backend and frontend automatically.
 
 ## Validation Checks
 
-The migration process performs comprehensive validation checks:
+The migration process performs comprehensive validation checks in the following order:
 
-- **Column Validation**: Ensures all required columns are present
-- **Date Format Validation**: Validates that `current_period_started_at` and `current_period_ends_at` are in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)
-- **Date Period Validation**: Ensures date periods are logical (start dates not in future, end dates not in past)
-- **Missing Zip Code Validation**: Checks for missing zip codes in required countries (AU, CA, FR, DE, IN, IT, NL, ES, GB, US)
-- **Canadian Zip Code Validation**: Validates Canadian zip code format (Letter-Number-Letter Number-Letter-Number)
-- **US Zip Code Validation**: Validates US zip code format (exactly 5 digits, with optional autocorrection for 4-digit codes)
-- **No Token Found**: Identifies records with no matching token in the mapping file
-- **Successfully Mapped Records**: Shows the final count of records ready for import
+1. **Column Validation**: Ensures all required columns are present
+2. **Unsupported Countries Validation**: Checks that `address_country_code` does not contain unsupported countries (AF, AQ, BY, MM, CF, CU, CD, HT, IR, LY, ML, AN, NI, KP, RU, SO, SS, SD, SY, VE, YE, ZW)
+3. **Date Format Validation**: Validates that `current_period_started_at` and `current_period_ends_at` are in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)
+4. **Date Period Validation**: Ensures date periods are logical (`current_period_started_at` dates should not be in the future, `current_period_ends_at` dates should not be in the past)
+5. **Missing Zip Code Validation**: Checks for missing zip codes in required countries (AU, CA, FR, DE, IN, IT, NL, ES, GB, US). Can optionally pull missing zip codes from the mapping file if the checkbox is enabled
+6. **Canadian Zip Code Validation**: Validates Canadian zip code format (Letter-Number-Letter Number-Letter-Number)
+7. **US Zip Code Validation**: Validates US zip code format (exactly 5 digits, with optional autocorrection for 4-digit codes if the checkbox is enabled)
+8. **No Token Found**: Identifies records with no matching token in the mapping file
+9. **Successfully Mapped Records**: Shows the final count of records ready for import
 
-All validation results are displayed on a single page with downloadable error reports. A "Download All Reports" button provides a zip file containing all validation failures, duplicate warnings, no token found records, and successfully mapped records.
+All validation results are displayed on a single page with downloadable error reports. Validation boxes are collapsible (except when they pass without additional content). A "Download All Reports" button provides a zip file containing all validation failures, duplicate warnings, no token found records, and successfully mapped records.
+
+**Note**: If any validation check fails, those records are removed from the final successful export. All validation checks run on the complete dataset before any records are removed, so records with multiple validation failures will be identified correctly.
+
+## Duplicate Detection
+
+In addition to validation checks, the migration process also performs duplicate detection. These are displayed as **warnings** (yellow boxes) on the same page as validation results and do **not** cause records to be excluded from the final export:
+
+- **Duplicate Tokens**: Records with duplicate `card_token` values
+- **Duplicate Card IDs**: Records with duplicate card IDs (Stripe only)
+- **Duplicate External Subscription IDs**: Records with duplicate `subscription_external_id` values
+- **Duplicate Emails**: Records with duplicate `customer_email` values (Production only, skipped in Sandbox mode since emails are anonymized)
+
+Duplicate detection runs even if validation checks fail, allowing you to see all potential issues at once. Downloadable reports are available for each duplicate type.
 
 ## Configuration
 
@@ -230,17 +246,20 @@ required_countries_dict = {
 
 The migration process generates several CSV files:
 
-- **`*_final_import.csv`**: Successfully processed data ready for import
+- **`*_final_import.csv`**: Successfully processed data ready for import (excludes all records that failed any validation check)
 - **`*_no_token_found.csv`**: Records with missing payment tokens
-- **`*_duplicate_tokens.csv`**: Records with duplicate payment tokens
-- **`*_duplicate_card_ids.csv`**: Records with duplicate card IDs (Stripe only)
-- **`*_duplicate_external_subscription_ids.csv`**: Records with duplicate subscription IDs
-- **`*_duplicate_emails.csv`**: Records with duplicate email addresses (Production only, skipped in Sandbox)
+- **`*_duplicate_tokens.csv`**: Records with duplicate payment tokens (warning, not a validation failure)
+- **`*_duplicate_card_ids.csv`**: Records with duplicate card IDs (Stripe only, warning, not a validation failure)
+- **`*_duplicate_external_subscription_ids.csv`**: Records with duplicate subscription IDs (warning, not a validation failure)
+- **`*_duplicate_emails.csv`**: Records with duplicate email addresses (Production only, skipped in Sandbox, warning, not a validation failure)
+- **`*_unsupported_countries.csv`**: Records with unsupported country codes
 - **`*_invalid_date_formats.csv`**: Records with incorrect date formats
 - **`*_invalid_date_periods.csv`**: Records with invalid date periods
 - **`*_missing_zip_codes.csv`**: Records with missing zip codes
 - **`*_invalid_ca_zip_codes.csv`**: Records with invalid Canadian zip code formats
 - **`*_invalid_us_zip_codes.csv`**: Records with invalid US zip code formats
+
+**Note**: All files are prefixed with the seller name and suffixed with `_sandbox` if running in sandbox mode. The "Download All Reports" button creates a zip file containing all available reports.
 
 ## Python Script Usage
 
@@ -310,6 +329,7 @@ Required columns:
 
 - RESTful API endpoints for file processing
 - File upload handling and validation
+- Large file support (up to 2GB, approximately 1 million records)
 - Secure file processing on server-side
 - CORS support for frontend communication
 - File download endpoints
