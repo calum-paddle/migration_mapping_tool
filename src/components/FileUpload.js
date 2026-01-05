@@ -62,7 +62,7 @@ const FileUpload = ({ onProcessingComplete }) => {
     });
   };
 
-  const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, autocorrect = false, useMappingZip = false, proceedWithoutMissing = false) => {
+  const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, autocorrect = false, useMappingZip = false) => {
     const formData = new FormData();
     formData.append('subscriber_file', subFile);
     formData.append('mapping_file', mapFile);
@@ -75,9 +75,6 @@ const FileUpload = ({ onProcessingComplete }) => {
     }
     if (useMappingZip) {
       formData.append('use_mapping_zip_codes', 'true');
-    }
-    if (proceedWithoutMissing) {
-      formData.append('proceed_without_missing_records', 'true');
     }
 
     try {
@@ -301,16 +298,7 @@ const FileUpload = ({ onProcessingComplete }) => {
         // For now, just show success
         setProcessingStatus('Processing completed successfully!');
         setIsProcessing(false);
-      } else if (result.status === 'proceed_without_missing_records_requested') {
-        // Restart processing with proceed without missing records flag
-        setProcessingStatus('Restarting processing without missing records...');
-        // Reset validation results to start fresh
-        setValidationResults([]);
-        
-        // Restart the processing without missing records
-        await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, false, false, true);
       }
-      
     } catch (err) {
       setError('Error processing user choice: ' + err.message);
       setIsProcessing(false);

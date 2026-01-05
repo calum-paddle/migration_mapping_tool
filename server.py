@@ -59,7 +59,6 @@ def process_migration_api():
         provider = request.form.get('provider', 'stripe')
         autocorrect_us_zip = request.form.get('autocorrect_us_zip', 'false').lower() == 'true'
         use_mapping_zip_codes = request.form.get('use_mapping_zip_codes', 'false').lower() == 'true'
-        proceed_without_missing_records = request.form.get('proceed_without_missing_records', 'false').lower() == 'true'
         
         # Validate files
         if subscriber_file.filename == '':
@@ -99,8 +98,7 @@ def process_migration_api():
             provider, 
             seller_name,
             autocorrect_us_zip,
-            use_mapping_zip_codes,
-            proceed_without_missing_records
+            use_mapping_zip_codes
         )
         
         # Check if validation failed (new format: all validations returned together)
@@ -234,15 +232,6 @@ def continue_processing():
                 })
             except Exception as e:
                 return jsonify({'error': f'Use mapping zip codes failed: {str(e)}'}), 500
-        elif user_choice == 'proceed_without_missing_records':
-            # Proceed without missing records
-            try:
-                return jsonify({
-                    'status': 'proceed_without_missing_records_requested',
-                    'message': 'Proceed without missing records requested'
-                })
-            except Exception as e:
-                return jsonify({'error': f'Proceed without missing records failed: {str(e)}'}), 500
         else:
             return jsonify({'error': 'Invalid user choice'}), 400
             

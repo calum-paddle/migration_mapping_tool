@@ -5,6 +5,26 @@ import string
 import os
 import time
 import zipfile
+import re
+
+def clean_dataframe_for_csv(df):
+    """
+    Helper function to clean DataFrame columns for CSV export.
+    Converts all columns to strings, handles NaN values, and removes .0 suffixes.
+    
+    Args:
+        df: DataFrame to clean
+        
+    Returns:
+        DataFrame with cleaned string columns
+    """
+    df_cleaned = df.copy()
+    for col in df_cleaned.columns:
+        # Handle NaN values and ensure all data is string
+        df_cleaned[col] = df_cleaned[col].fillna('').astype(str).replace('nan', '')
+        # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
+        df_cleaned[col] = df_cleaned[col].str.replace(r'\.0$', '', regex=True)
+    return df_cleaned
 
 def generate_random_email():
     """Generate a random email for sandbox data anonymization"""
@@ -80,7 +100,6 @@ def validate_subscriber_columns(columns):
         r'quantity_\d+'
     ]
     
-    import re
     optional_columns = []
     for pattern in optional_patterns:
         for col in columns:
@@ -107,8 +126,6 @@ def validate_bluesnap_card_tokens(subscriber_data, seller_name='', is_sandbox=Fa
     Returns:
         dict: Validation results with status and incorrect records
     """
-    import re
-    
     try:
         # Check if card_token column exists
         if 'card_token' not in subscriber_data.columns:
@@ -188,11 +205,7 @@ def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=F
         
         # Convert all columns to strings to prevent float conversion in CSV
         if not incorrect_records.empty:
-            for col in incorrect_records.columns:
-                # Handle NaN values and ensure all data is string
-                incorrect_records[col] = incorrect_records[col].fillna('').astype(str).replace('nan', '')
-                # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
-                incorrect_records[col] = incorrect_records[col].str.replace(r'\.0$', '', regex=True)
+            incorrect_records = clean_dataframe_for_csv(incorrect_records)
         
         incorrect_count = len(incorrect_records)
         total_records = len(validation_data)
@@ -246,8 +259,6 @@ def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
     Returns:
         dict: Validation results with status and incorrect records
     """
-    import re
-    
     try:
         # Check if required columns exist
         required_columns = ['current_period_started_at', 'current_period_ends_at']
@@ -293,11 +304,7 @@ def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
         
         # Convert all columns to strings to prevent float conversion in CSV
         if not incorrect_records.empty:
-            for col in incorrect_records.columns:
-                # Handle NaN values and ensure all data is string
-                incorrect_records[col] = incorrect_records[col].fillna('').astype(str).replace('nan', '')
-                # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
-                incorrect_records[col] = incorrect_records[col].str.replace(r'\.0$', '', regex=True)
+            incorrect_records = clean_dataframe_for_csv(incorrect_records)
         
         return {
             'valid': len(incorrect_records) == 0,
@@ -498,9 +505,7 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
         # Wrap this in try/except to preserve missing_count even if conversion fails
         try:
             if not missing_zip_codes.empty:
-                for col in missing_zip_codes.columns:
-                    missing_zip_codes[col] = missing_zip_codes[col].fillna('').astype(str).replace('nan', '')
-                    missing_zip_codes[col] = missing_zip_codes[col].str.replace(r'\.0$', '', regex=True)
+                missing_zip_codes = clean_dataframe_for_csv(missing_zip_codes)
         except Exception as e:
             print(f"Warning: Error converting columns to strings: {e}")
             # Continue with unconverted data - missing_count is still valid
@@ -547,8 +552,6 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
         dict: Validation results with status and incorrect records
     """
     try:
-        import re
-        
         # Filter for Canadian records
         ca_records = data[data['address_country_code'] == 'CA'].copy()
         
@@ -587,11 +590,7 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
         
         # Convert all columns to strings to prevent float conversion in CSV
         if not invalid_zip_codes.empty:
-            for col in invalid_zip_codes.columns:
-                # Handle NaN values and ensure all data is string
-                invalid_zip_codes[col] = invalid_zip_codes[col].fillna('').astype(str).replace('nan', '')
-                # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
-                invalid_zip_codes[col] = invalid_zip_codes[col].str.replace(r'\.0$', '', regex=True)
+            invalid_zip_codes = clean_dataframe_for_csv(invalid_zip_codes)
         
         return {
             'valid': len(invalid_zip_codes) == 0,
@@ -623,8 +622,6 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
         dict: Validation results with status and incorrect records
     """
     try:
-        import re
-        
         # Filter for US records
         us_records = data[data['address_country_code'] == 'US'].copy()
         
@@ -669,11 +666,7 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
         
         # Convert all columns to strings to prevent float conversion in CSV
         if not invalid_zip_codes.empty:
-            for col in invalid_zip_codes.columns:
-                # Handle NaN values and ensure all data is string
-                invalid_zip_codes[col] = invalid_zip_codes[col].fillna('').astype(str).replace('nan', '')
-                # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
-                invalid_zip_codes[col] = invalid_zip_codes[col].str.replace(r'\.0$', '', regex=True)
+            invalid_zip_codes = clean_dataframe_for_csv(invalid_zip_codes)
         
         return {
             'valid': len(invalid_zip_codes) == 0,
@@ -694,7 +687,7 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
             'autocorrectable_count': 0
         }
 
-def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', autocorrect_us_zip=False, use_mapping_zip_codes=False, proceed_without_missing_records=False):
+def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', autocorrect_us_zip=False, use_mapping_zip_codes=False):
     """
     Process migration from payment providers to Paddle Billing
     
@@ -1341,89 +1334,6 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 print("No missing records found to update.")
                 # Continue with the existing error handling logic below
         
-        elif proceed_without_missing_records:
-            print("User chose to proceed without missing records. Removing records with missing zip codes...")
-            
-            # Remove records with missing zip codes for the specified countries
-            target_countries = ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US']
-            missing_mask = (completed['address_country_code'].isin(target_countries)) & (completed['address_postal_code'].isna() | (completed['address_postal_code'] == ''))
-            
-            records_to_remove = completed[missing_mask]
-            completed = completed[~missing_mask]
-            
-            print(f"Removed {len(records_to_remove)} records with missing zip codes.")
-            print(f"Remaining records: {len(completed)}")
-            
-            # Re-run the missing zip code validation
-            try:
-                missing_zip_validation = validate_missing_zip_codes(completed, provider, seller_name, is_sandbox)
-            except Exception as e:
-                print(f"Error during missing zip code validation after removal: {e}")
-                validation_results.append({
-                        'valid': False,
-                    'step': 'missing_zip_code_validation',
-                    'error': f'Validation error after removal: {str(e)}',
-                        'missing_count': 0,
-                        'total_records': 0,
-                        'available_from_mapping': 0,
-                    'download_file': None,
-                    'required_countries': ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US'],  # Fallback
-                    'required_countries_dict': {
-                        'AU': '🇦🇺', 'CA': '🇨🇦', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IN': '🇮🇳', 
-                        'IT': '🇮🇹', 'NL': '🇳🇱', 'ES': '🇪🇸', 'GB': '🇬🇧', 'US': '🇺🇸'
-                    }  # Fallback
-                })
-                missing_zip_validation = None
-            
-            if missing_zip_validation:
-                if missing_zip_validation['valid']:
-                    print(f"Missing zip code validation passed after removing missing records. All {missing_zip_validation['total_records']} records have zip codes.")
-                    # Add successful missing zip code validation to results
-                validation_results.append({
-                    'valid': True,
-                        'step': 'missing_zip_code_validation',
-                        'total_records': missing_zip_validation['total_records'],
-                        'required_countries': missing_zip_validation.get('required_countries', []),
-                        'required_countries_dict': missing_zip_validation.get('required_countries_dict', {})
-                })
-            else:
-                    # Still have missing zip codes after removal - continue processing
-                    print(f"Still have {missing_zip_validation['missing_count']} missing zip codes after removal.")
-                    # Save error but continue
-                    download_file = None
-                    if missing_zip_validation['missing_records'] is not None:
-                        try:
-                            output_dir = 'outputs'
-                            os.makedirs(output_dir, exist_ok=True)
-                            clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-                            clean_seller_name = clean_seller_name.replace(' ', '_')
-                            env_suffix = "_sandbox" if is_sandbox else "_production"
-                            missing_filename = f"{clean_seller_name}_missing_zip_codes{env_suffix}_{int(time.time())}.csv"
-                            missing_path = os.path.join(output_dir, missing_filename)
-                            missing_zip_validation['missing_records'].to_csv(missing_path, index=False)
-                            download_file = missing_filename
-                        except Exception as e:
-                            print(f"Error saving missing records file: {e}")
-                    
-                    # Collect failed _temp_row_id values from missing records
-                    if missing_zip_validation['missing_records'] is not None and '_temp_row_id' in missing_zip_validation['missing_records'].columns:
-                        # Convert back from string to int (since validation functions convert all columns to strings)
-                        temp_ids = missing_zip_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                        failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                        failed_ids = [x for x in failed_ids if x is not None]
-                        failed_row_ids.update(failed_ids)
-                    
-                    validation_results.append({
-                        'valid': False,
-                        'step': 'missing_zip_code_validation',
-                        'missing_count': missing_zip_validation['missing_count'],
-                        'total_records': missing_zip_validation['total_records'],
-                        'available_from_mapping': missing_zip_validation.get('available_from_mapping', 0),
-                        'download_file': download_file,
-                        'required_countries': missing_zip_validation.get('required_countries', []),
-                        'required_countries_dict': missing_zip_validation.get('required_countries_dict', {})
-                    })
-        
         else:
             # User hasn't made a choice yet - save error but continue processing
             # Save missing records to a file for download
@@ -1998,12 +1908,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             print(f"Saving file: {file_path}")
             
             # Convert all columns to strings to prevent float conversion
-            df_string = df.copy()
-            for col in df_string.columns:
-                # Handle NaN values and ensure all data is string
-                df_string[col] = df_string[col].fillna('').astype(str).replace('nan', '')
-                # Remove decimal points from numeric strings (e.g., '8830.0' -> '8830')
-                df_string[col] = df_string[col].str.replace(r'\.0$', '', regex=True)
+            df_string = clean_dataframe_for_csv(df)
             
             # Save with string formatting
             df_string.to_csv(file_path, index=False)
