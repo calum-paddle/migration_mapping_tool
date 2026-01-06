@@ -1619,8 +1619,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     if ca_zip_validation:
         if not ca_zip_validation['valid']:
             print(f"CA zip code validation failed. Found {ca_zip_validation['incorrect_count']} incorrect formats.")
-        
-        # Save incorrect records to a file for download
+            
+            # Save incorrect records to a file for download
             download_file = None
             if ca_zip_validation['incorrect_records'] is not None:
                 try:
@@ -1645,24 +1645,24 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                     failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
                     failed_ids = [x for x in failed_ids if x is not None]
                     failed_row_ids.update(failed_ids)
-                
-                # Add failed validation to results but continue processing
-                validation_results.append({
-                    'valid': False,
-                    'step': 'ca_zip_code_validation',
-                    'incorrect_count': ca_zip_validation['incorrect_count'],
-                    'total_records': ca_zip_validation['total_records'],
-                    'download_file': download_file
-                })
+            
+            # Add failed validation to results but continue processing
+            validation_results.append({
+                'valid': False,
+                'step': 'ca_zip_code_validation',
+                'incorrect_count': ca_zip_validation['incorrect_count'],
+                'total_records': ca_zip_validation['total_records'],
+                'download_file': download_file
+            })
         else:
             print(f"CA zip code validation passed. All {ca_zip_validation['total_records']} Canadian zip codes are correctly formatted.")
             
             # Add successful CA zip code validation to results
-    validation_results.append({
-        'valid': True,
+            validation_results.append({
+                'valid': True,
                 'step': 'ca_zip_code_validation',
                 'total_records': ca_zip_validation['total_records']
-    })
+            })
     
     # US Zip Code Validation
     print("Validating US zip codes...")
@@ -1761,12 +1761,12 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             print(f"US zip code validation passed. All {us_zip_validation['total_records']} US zip codes are correctly formatted.")
             
             # Add successful US zip code validation to results
-    validation_results.append({
-        'valid': True,
+            validation_results.append({
+                'valid': True,
                 'step': 'us_zip_code_validation',
                 'autocorrected_count': 0,  # No records autocorrected since validation passed without action
                 'total_records': us_zip_validation['total_records']
-    })
+            })
     
     print("Starting duplicate detection...")
     
