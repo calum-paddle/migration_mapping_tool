@@ -2,6 +2,38 @@
 
 A React-based frontend application for migrating data from Stripe or Bluesnap to Paddle Billing, with support for both production and sandbox environments.
 
+## 🚀 Quick Start
+
+**Get up and running in 3 steps:**
+
+1. **Clone the repository** (if you haven't already):
+   ```bash
+   git clone https://github.com/calum-paddle/migration_mapping_tool.git
+   cd migration_mapping_tool
+   ```
+
+2. **Run the setup script**:
+   ```bash
+   python3 setup.py
+   ```
+   This will create a virtual environment and install all dependencies.
+
+3. **Start the application**:
+   ```bash
+   python3 start.py
+   ```
+
+That's it! The application will be available at:
+- **Frontend**: http://localhost:3000 (opens automatically)
+- **Backend API**: http://localhost:5001
+
+### Prerequisites
+
+Before starting, make sure you have:
+- **Python 3.7+** (with pip)
+- **Node.js 14+** (with npm)
+
+The setup script will check these for you automatically.
 
 ## Features
 
@@ -36,35 +68,43 @@ A React-based frontend application for migrating data from Stripe or Bluesnap to
 
 ## Installation
 
-### Prerequisites
+### Automatic Setup (Recommended)
 
-Before running the setup, ensure you have:
+The setup script handles everything automatically:
 
-- **Python 3.7+** with pip
-- **Node.js 14+** with npm
+```bash
+python3 setup.py
+```
 
-### Installation Steps
+This will:
+- ✅ Check Python and Node.js versions
+- ✅ Create a Python virtual environment (`venv/`)
+- ✅ Install all Python dependencies in the virtual environment
+- ✅ Install all Node.js dependencies
 
-1. **Run the setup script** (recommended):
+**Note:** The virtual environment keeps dependencies isolated from your system Python, following Python best practices.
+
+### Manual Installation
+
+If you prefer to set up manually:
+
+1. **Create and activate virtual environment**:
 
    ```bash
-   python3 setup.py
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-   This will install all dependencies automatically.
-
-2. **Manual installation**:
-
-   **Install Node.js dependencies**:
-
-   ```bash
-   npm install
-   ```
-
-   **Install Python dependencies**:
+2. **Install Python dependencies**:
 
    ```bash
    pip install -r requirements.txt
+   ```
+
+3. **Install Node.js dependencies**:
+
+   ```bash
+   npm install
    ```
 
 ### Troubleshooting
@@ -103,21 +143,47 @@ python -m pip install -r requirements.txt
 python3 -m pip install -r requirements.txt
 ```
 
+#### Virtual Environment Issues
+
+If you encounter issues with the virtual environment:
+
+**Recreate the virtual environment:**
+
+```bash
+rm -rf venv  # On Windows: rmdir /s venv
+python3 setup.py
+```
+
+**Check if venv is being used:**
+
+The `start.py` script automatically detects and uses the venv if it exists. You can verify by checking if `venv/` directory exists in the project root.
+
 ## Usage
 
 ### Starting the Application
 
-**Option 1: Use the startup script (recommended)**:
+**Recommended: Use the startup script**
 
 ```bash
 python3 start.py
 ```
 
-This will start both the backend and frontend automatically.
+This automatically:
+- Uses the virtual environment Python interpreter (if venv exists)
+- Starts the Flask backend server at `http://localhost:5001`
+- Waits for the backend to be ready
+- Starts the React frontend at `http://localhost:3000`
+- Opens the frontend in your browser
 
-**Option 2: Start manually**:
+**Manual startup** (if needed):
 
-1. **Start the Flask backend**:
+1. **Activate virtual environment** (if using manual setup):
+
+   ```bash
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+2. **Start the Flask backend** (in one terminal):
 
    ```bash
    python3 server.py
@@ -125,7 +191,7 @@ This will start both the backend and frontend automatically.
 
    The backend will run at `http://localhost:5001`
 
-2. **Start the React frontend** (in a new terminal):
+3. **Start the React frontend** (in another terminal):
    ```bash
    npm start
    ```

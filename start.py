@@ -20,11 +20,26 @@ def check_backend_health():
     except:
         return False
 
+def get_venv_python():
+    """Get the Python interpreter path from venv if it exists"""
+    if sys.platform == 'win32':
+        venv_python = os.path.join('venv', 'Scripts', 'python.exe')
+    else:
+        venv_python = os.path.join('venv', 'bin', 'python')
+    
+    if os.path.exists(venv_python):
+        return venv_python
+    return None
+
 def start_backend():
     """Start the Flask backend server"""
     print("🚀 Starting Flask backend server...")
     try:
-        subprocess.run([sys.executable, 'server.py'], check=True)
+        # Use venv Python if available, otherwise use system Python
+        python_exec = get_venv_python() or sys.executable
+        if python_exec != sys.executable:
+            print(f"   Using virtual environment Python: {python_exec}")
+        subprocess.run([python_exec, 'server.py'], check=True)
     except KeyboardInterrupt:
         print("\n🛑 Backend server stopped")
     except Exception as e:

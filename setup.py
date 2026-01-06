@@ -47,34 +47,62 @@ def check_npm():
         print("✗ npm is not installed. Please install npm with Node.js")
         return False
 
+def create_venv():
+    """Create virtual environment if it doesn't exist"""
+    venv_path = 'venv'
+    if os.path.exists(venv_path):
+        print(f"✓ Virtual environment already exists at {venv_path}")
+        return True
+    
+    print("Creating virtual environment...")
+    try:
+        subprocess.run([sys.executable, '-m', 'venv', venv_path], check=True, capture_output=True, text=True)
+        print(f"✓ Virtual environment created at {venv_path}")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"✗ Failed to create virtual environment: {e.stderr}")
+        return False
+
+def get_venv_python():
+    """Get the Python interpreter path from venv"""
+    if sys.platform == 'win32':
+        return os.path.join('venv', 'Scripts', 'python.exe')
+    else:
+        return os.path.join('venv', 'bin', 'python')
+
+def get_venv_pip():
+    """Get the pip path from venv"""
+    if sys.platform == 'win32':
+        return os.path.join('venv', 'Scripts', 'pip.exe')
+    else:
+        return os.path.join('venv', 'bin', 'pip')
+
 def install_python_dependencies():
-    """Install Python dependencies"""
-    dependencies = ['pandas', 'flask', 'flask-cors', 'werkzeug', 'requests']
-    
-    # Try different pip commands
-    pip_commands = ['pip', 'pip3', 'python -m pip', 'python3 -m pip']
-    pip_command = None
-    
-    for cmd in pip_commands:
-        try:
-            result = subprocess.run(f"{cmd} --version", shell=True, capture_output=True, text=True)
-            if result.returncode == 0:
-                pip_command = cmd
-                print(f"✓ Found pip: {cmd}")
-                break
-        except:
-            continue
-    
-    if not pip_command:
-        print("✗ pip not found. Please install pip first:")
-        print("  - macOS: brew install python")
-        print("  - Ubuntu/Debian: sudo apt-get install python3-pip")
-        print("  - Windows: Download from https://pip.pypa.io/")
+    """Install Python dependencies in virtual environment"""
+    # Create venv first
+    if not create_venv():
         return False
     
-    for dep in dependencies:
-        if not run_command(f"{pip_command} install {dep}", f"Installing {dep}"):
+    # Get venv pip path
+    venv_pip = get_venv_pip()
+    
+    # Check if venv pip exists
+    if not os.path.exists(venv_pip):
+        print(f"✗ Virtual environment pip not found at {venv_pip}")
+        print("  Try recreating the virtual environment")
+        return False
+    
+    # Install from requirements.txt if it exists, otherwise install individual packages
+    if os.path.exists('requirements.txt'):
+        if not run_command(f'"{venv_pip}" install -r requirements.txt', "Installing Python dependencies from requirements.txt"):
             return False
+    else:
+        # Fallback to individual packages
+        dependencies = ['pandas', 'flask', 'flask-cors', 'werkzeug', 'requests']
+        for dep in dependencies:
+            if not run_command(f'"{venv_pip}" install {dep}', f"Installing {dep}"):
+                return False
+    
     return True
 
 def install_node_dependencies():
@@ -112,6 +140,8 @@ def main():
     print("\n✅ Setup completed successfully!")
     print("\n🎉 You can now start the application with:")
     print("   python3 start.py")
+    print("\n💡 Note: Dependencies are installed in a virtual environment (venv/)")
+    print("   The start script will automatically use the venv Python interpreter.")
     print("\n📖 For more information, see README.md")
 
 if __name__ == "__main__":

@@ -25,6 +25,9 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+venv/
+env/
+ENV/
 
 # Environment variables
 .env
