@@ -1020,47 +1020,47 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             
             # Save incorrect records to a file for download
             download_file = None
-        if date_validation['incorrect_records'] is not None:
-            try:
-                output_dir = 'outputs'
-                os.makedirs(output_dir, exist_ok=True)
-                
-                # Create filename with seller name and environment
-                clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-                clean_seller_name = clean_seller_name.replace(' ', '_')
-                env_suffix = "_sandbox" if is_sandbox else "_production"
-                incorrect_filename = f"{clean_seller_name}_invalid_date_periods{env_suffix}_{int(time.time())}.csv"
-                incorrect_path = os.path.join(output_dir, incorrect_filename)
-                date_validation['incorrect_records'].to_csv(incorrect_path, index=False)
-                download_file = incorrect_filename
-                print(f"Saved incorrect records to: {incorrect_path}")
-            except Exception as e:
-                print(f"Error saving incorrect records file: {e}")
-                
-                # Collect failed _temp_row_id values from incorrect records
-                if date_validation['incorrect_records'] is not None and '_temp_row_id' in date_validation['incorrect_records'].columns:
-                    # Convert back from string to int (since validation functions convert all columns to strings)
-                    temp_ids = date_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                    failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                    failed_ids = [x for x in failed_ids if x is not None]
-                    failed_row_ids.update(failed_ids)
-                
-                # Add failed validation to results but continue processing
-                validation_results.append({
-                    'valid': False,
-            'step': 'date_validation',
-                    'incorrect_count': date_validation['incorrect_count'],
-                    'total_records': date_validation['total_records'],
-                    'download_file': download_file
-                })
+            if date_validation['incorrect_records'] is not None:
+                try:
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    
+                    # Create filename with seller name and environment
+                    clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = "_sandbox" if is_sandbox else "_production"
+                    incorrect_filename = f"{clean_seller_name}_invalid_date_periods{env_suffix}_{int(time.time())}.csv"
+                    incorrect_path = os.path.join(output_dir, incorrect_filename)
+                    date_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                    download_file = incorrect_filename
+                    print(f"Saved incorrect records to: {incorrect_path}")
+                except Exception as e:
+                    print(f"Error saving incorrect records file: {e}")
+            
+            # Collect failed _temp_row_id values from incorrect records
+            if date_validation['incorrect_records'] is not None and '_temp_row_id' in date_validation['incorrect_records'].columns:
+                # Convert back from string to int (since validation functions convert all columns to strings)
+                temp_ids = date_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
+                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
+                failed_ids = [x for x in failed_ids if x is not None]
+                failed_row_ids.update(failed_ids)
+            
+            # Add failed validation to results but continue processing
+            validation_results.append({
+                'valid': False,
+                'step': 'date_validation',
+                'incorrect_count': date_validation['incorrect_count'],
+                'total_records': date_validation['total_records'],
+                'download_file': download_file
+            })
         else:
             print(f"Date validation passed. All {date_validation['total_records']} date periods are valid.")
             # Add successful date validation to results
             validation_results.append({
-        'valid': True,
-        'step': 'date_validation',
-        'total_records': date_validation['total_records']
-    })
+                'valid': True,
+                'step': 'date_validation',
+                'total_records': date_validation['total_records']
+            })
     
     # Provider-specific data processing
     if provider.lower() == 'bluesnap':
