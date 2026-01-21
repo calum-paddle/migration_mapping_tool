@@ -584,8 +584,9 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
             }
         
         # Check zip codes format (only for records that have zip codes)
+        # Strip whitespace before matching to handle zip codes with leading/trailing spaces
         invalid_zip_codes = ca_records_with_zip[
-            ~ca_records_with_zip['address_postal_code'].astype(str).str.match(ca_zip_pattern, case=False)
+            ~ca_records_with_zip['address_postal_code'].astype(str).str.strip().str.match(ca_zip_pattern, case=False)
         ].copy()
         
         # Convert all columns to strings to prevent float conversion in CSV
@@ -637,11 +638,32 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
         # US zip code regex pattern - only 5 digits
         us_zip_pattern = r'^\d{5}$'
         
+        # Helper function to convert zip codes properly (handle floats like 90031.0 -> '90031')
+        def normalize_zip_code(zip_val):
+            """Convert zip code to string, handling both float and string values properly.
+            
+            Handles:
+            - Floats like 90031.0 -> '90031' (converts to int first)
+            - Strings like '90031' -> '90031' (strips whitespace)
+            - Strings with spaces like ' 90031 ' -> '90031' (strips whitespace)
+            """
+            if pd.isna(zip_val):
+                return ''
+            # If it's a float that represents an integer (e.g., 90031.0), convert to int first
+            if isinstance(zip_val, float):
+                # Check if it's a whole number
+                if zip_val.is_integer():
+                    return str(int(zip_val))
+                else:
+                    return str(zip_val)
+            # For strings or other types, convert to string and strip whitespace
+            return str(zip_val).strip()
+        
         # Filter out missing/empty zip codes (those are handled by missing zip code validation)
         # Only validate format for records that have zip codes
         us_records_with_zip = us_records[
             us_records['address_postal_code'].notna() & 
-            (us_records['address_postal_code'].astype(str).str.strip() != '')
+            (us_records['address_postal_code'].apply(normalize_zip_code) != '')
         ].copy()
         
         if len(us_records_with_zip) == 0:
@@ -653,16 +675,22 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
                 'autocorrectable_count': 0
             }
         
-        # Check zip codes format (only for records that have zip codes)
-        invalid_zip_codes = us_records_with_zip[
-            ~us_records_with_zip['address_postal_code'].astype(str).str.match(us_zip_pattern)
-        ].copy()
+        # Normalize zip codes (convert floats to proper strings)
+        us_records_with_zip = us_records_with_zip.copy()
+        us_records_with_zip['_normalized_zip'] = us_records_with_zip['address_postal_code'].apply(normalize_zip_code)
+        
+        # Check zip codes format using normalized values
+        matches = us_records_with_zip['_normalized_zip'].str.match(us_zip_pattern)
+        invalid_zip_codes = us_records_with_zip[~matches].copy()
         
         # Count 4-digit codes that can be autocorrected
         four_digit_codes = us_records_with_zip[
-            us_records_with_zip['address_postal_code'].astype(str).str.match(r'^\d{4}$')
+            us_records_with_zip['_normalized_zip'].str.match(r'^\d{4}$')
         ]
         autocorrectable_count = len(four_digit_codes)
+        
+        # Drop the temporary normalized column before returning
+        invalid_zip_codes = invalid_zip_codes.drop(columns=['_normalized_zip'], errors='ignore')
         
         # Convert all columns to strings to prevent float conversion in CSV
         if not invalid_zip_codes.empty:
@@ -1693,14 +1721,29 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             
                 # Find US records with 4-digit zip codes and add leading zero
                 us_records_mask = completed['address_country_code'] == 'US'
-                four_digit_mask = completed['address_postal_code'].astype(str).str.match(r'^\d{4}$')
+                
+                # Helper function to normalize zip codes (handle floats like 9003.0 -> '9003')
+                def normalize_zip_for_autocorrect(zip_val):
+                    if pd.isna(zip_val):
+                        return ''
+                    if isinstance(zip_val, float) and zip_val.is_integer():
+                        return str(int(zip_val))
+                    return str(zip_val).strip()
+                
+                # Create a copy of US records to work with
+                us_records_subset = completed.loc[us_records_mask, 'address_postal_code'].copy()
+                normalized_zips = us_records_subset.apply(normalize_zip_for_autocorrect)
+                four_digit_mask = normalized_zips.str.match(r'^\d{4}$')
                 
                 # Count how many will be corrected
-                autocorrected_count = int((us_records_mask & four_digit_mask).sum())
+                autocorrected_count = int(four_digit_mask.sum())
                 
-                # Apply autocorrect
-                completed.loc[us_records_mask & four_digit_mask, 'address_postal_code'] = \
-                    completed.loc[us_records_mask & four_digit_mask, 'address_postal_code'].astype(str).str.zfill(5)
+                # Apply autocorrect - normalize first, then zfill
+                if autocorrected_count > 0:
+                    # Get the indices of records to correct
+                    indices_to_correct = us_records_subset[four_digit_mask].index
+                    completed.loc[indices_to_correct, 'address_postal_code'] = \
+                        normalized_zips.loc[indices_to_correct].str.zfill(5)
                 
                 print(f"Autocorrected {autocorrected_count} US zip codes.")
                 
