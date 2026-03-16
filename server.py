@@ -56,6 +56,7 @@ def process_migration_api():
         seller_name = request.form.get('seller_name', '')
         vault_provider = request.form.get('vault_provider', '')
         is_sandbox = request.form.get('is_sandbox', 'false').lower() == 'true'
+        anonymise_email = request.form.get('anonymise_email', 'false').lower() == 'true'
         provider = request.form.get('provider', 'stripe')
         autocorrect_us_zip = request.form.get('autocorrect_us_zip', 'false').lower() == 'true'
         use_mapping_zip_codes = request.form.get('use_mapping_zip_codes', 'false').lower() == 'true'
@@ -98,7 +99,8 @@ def process_migration_api():
             provider, 
             seller_name,
             autocorrect_us_zip,
-            use_mapping_zip_codes
+            use_mapping_zip_codes,
+            anonymise_email
         )
         
         # Check if validation failed (new format: all validations returned together)

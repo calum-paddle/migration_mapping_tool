@@ -715,7 +715,7 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
             'autocorrectable_count': 0
         }
 
-def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', autocorrect_us_zip=False, use_mapping_zip_codes=False):
+def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', autocorrect_us_zip=False, use_mapping_zip_codes=False, anonymise_email=False):
     """
     Process migration from payment providers to Paddle Billing
     
@@ -726,10 +726,13 @@ def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=
         is_sandbox: Boolean indicating if this is sandbox mode
         provider: String indicating the payment provider ('stripe' or 'bluesnap')
         seller_name: Name of the seller for file naming
+        anonymise_email: Boolean; when True and is_sandbox, customer emails are anonymised (blackhole addresses)
     
     Returns:
         dict: Processing results and file information
     """
+    # Only anonymise when in sandbox and the option is enabled
+    anonymise_emails = is_sandbox and anonymise_email
     start_time = time.time()
     
     # Welcome message based on environment
@@ -1596,14 +1599,14 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     # Detect duplicate emails BEFORE anonymization (so we can catch real duplicates)
     # Store this for later use - we'll use this directly for reporting
-    # Skip duplicate email detection in sandbox mode since emails will be anonymized
-    if is_sandbox:
+    # Skip duplicate email detection when we will anonymise (emails become unique)
+    if anonymise_emails:
         duplicate_emails_before_anonymization = pd.DataFrame()
     else:
         duplicate_emails_before_anonymization = completed[completed.duplicated(subset='customer_email', keep=False)].copy()
     
-    # Sandbox-specific data anonymization
-    if is_sandbox:
+    # Optional email anonymization (sandbox only, when toggle enabled)
+    if anonymise_emails:
         # Generate random emails to anonymize data (only emails, keep real names)
         completed['customer_email'] = completed['customer_email'].apply(lambda x: generate_random_email())
         print("Email addresses anonymized for sandbox")
@@ -1887,9 +1890,8 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     duplicate_external_subscription_ids = duplicate_external_subscription_ids_before_removal
     print(f"Using duplicate detections from before removal for reporting")
     
-    # Duplicate email detection - skip in sandbox mode since emails are anonymized
-    if is_sandbox:
-        # In sandbox, emails are anonymized so duplicate detection doesn't make sense
+    # Duplicate email detection - skip when emails were anonymized (they become unique)
+    if anonymise_emails:
         duplicate_emails = pd.DataFrame()
         duplicate_emails_for_report = pd.DataFrame()
     else:
@@ -2142,13 +2144,14 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 4:
-        print("Usage: python migration-import-unified.py <subscriber_file> <mapping_file> <vault_provider> [--sandbox]")
+        print("Usage: python migration-import-unified.py <subscriber_file> <mapping_file> <vault_provider> [--sandbox] [--anonymise-email]")
         sys.exit(1)
     
     subscriber_file = sys.argv[1]
     mapping_file = sys.argv[2]
     vault_provider = sys.argv[3]
     is_sandbox = '--sandbox' in sys.argv
+    anonymise_email = '--anonymise-email' in sys.argv
     
-    results = process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox)
+    results = process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox, anonymise_email=anonymise_email)
     print(f"Processing complete. Results: {results}") 

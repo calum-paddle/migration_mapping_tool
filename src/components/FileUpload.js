@@ -18,6 +18,7 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [zipFile, setZipFile] = useState(null);
   const [useMappingZipCodes, setUseMappingZipCodes] = useState(false);
   const [autocorrectUsZipCodes, setAutocorrectUsZipCodes] = useState(false);
+  const [anonymiseEmailInSandbox, setAnonymiseEmailInSandbox] = useState(false);
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -62,7 +63,7 @@ const FileUpload = ({ onProcessingComplete }) => {
     });
   };
 
-  const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, autocorrect = false, useMappingZip = false) => {
+  const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, autocorrect = false, useMappingZip = false, anonymiseEmail = false) => {
     const formData = new FormData();
     formData.append('subscriber_file', subFile);
     formData.append('mapping_file', mapFile);
@@ -76,6 +77,7 @@ const FileUpload = ({ onProcessingComplete }) => {
     if (useMappingZip) {
       formData.append('use_mapping_zip_codes', 'true');
     }
+    formData.append('anonymise_email', sandbox && anonymiseEmail ? 'true' : 'false');
 
     try {
       setProcessingStatus('Uploading files...');
@@ -331,7 +333,7 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
       
       // Process the migration with checkbox values
-      await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, autocorrectUsZipCodes, useMappingZipCodes);
+      await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, autocorrectUsZipCodes, useMappingZipCodes, anonymiseEmailInSandbox);
       
     } catch (err) {
       setError('Error processing migration: ' + err.message);
@@ -430,9 +432,22 @@ const FileUpload = ({ onProcessingComplete }) => {
             </button>
           </div>
           {isSandbox && (
-            <div className="sandbox-message">
-              Use blackhole email addresses
-            </div>
+            <>
+              <div className="sandbox-message">
+                Optionally anonymise customer emails with blackhole addresses using the toggle below.
+              </div>
+              <div className="checkbox-item sandbox-anonymise-toggle">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={anonymiseEmailInSandbox}
+                    onChange={(e) => setAnonymiseEmailInSandbox(e.target.checked)}
+                    className="checkbox-input"
+                  />
+                  <span>Anonymise email addresses</span>
+                </label>
+              </div>
+            </>
           )}
         </div>
 

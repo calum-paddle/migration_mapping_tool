@@ -296,6 +296,18 @@ input:checked + .slider:before {
   font-weight: 500;
 }
 
+.sandbox-anonymise-toggle {
+  margin-top: 0.75rem;
+}
+
+.sandbox-anonymise-toggle .checkbox-label {
+  gap: 1rem;
+}
+
+.sandbox-anonymise-toggle .checkbox-label span {
+  margin-left: 0.75rem;
+}
+
 .provider-btn {
   flex: 1;
   padding: 0.75rem 1rem;

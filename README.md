@@ -42,7 +42,7 @@ The setup script will check these for you automatically.
 - **File Upload**: Drag-and-drop CSV file upload functionality
 - **Data Processing**: Unified Python backend for data migration
 - **Duplicate Detection**: Comprehensive duplicate detection across multiple fields (tokens, card IDs, subscription IDs, emails)
-- **Data Anonymization**: Automatic email anonymization for sandbox mode
+- **Data Anonymization**: Optional email anonymization in sandbox mode (toggle when Sandbox is selected)
 - **Comprehensive Validation**: Column, unsupported countries, date format, date period, and zip code validation with downloadable error reports
 - **Zip Code Handling**: Options to use mapping file zip codes and autocorrect US zip codes with leading zeros via checkboxes
 - **Collapsible UI**: Validation boxes can be collapsed/expanded for better organization
@@ -200,7 +200,7 @@ This automatically:
 ### Using the Migration Tool
 
 1. **Select Provider**: Choose between Stripe or Bluesnap
-2. **Select Environment**: Toggle between Production and Sandbox modes
+2. **Select Environment**: Toggle between Production and Sandbox modes. When Sandbox is selected, an **Anonymise email addresses** toggle appears—enable it to replace customer emails with blackhole addresses.
 3. **Enter Vault Provider**: Provide the name of your vault provider
 4. **Enter Seller Name**: Provide the seller name for file naming
 5. **Configure Options** (optional):
@@ -223,11 +223,10 @@ This automatically:
 
 #### Sandbox Mode
 
-- Anonymizes customer email addresses (names are preserved)
 - Uses test tokens for processing
 - Adds "\_sandbox" suffix to output filenames
-- Duplicate email detection is skipped (since emails are anonymized and become unique)
-- All other duplicate detection (tokens, card IDs, subscription IDs) works the same as production
+- **Optional email anonymisation**: When Sandbox is selected, an "Anonymise email addresses" toggle appears. If enabled, customer email addresses are replaced with blackhole addresses (names are preserved). If disabled, emails are left as-is and duplicate email detection runs as in production.
+- All duplicate detection (tokens, card IDs, subscription IDs, emails when not anonymising) works the same as production
 
 ## Validation Checks
 
@@ -254,7 +253,7 @@ In addition to validation checks, the migration process also performs duplicate 
 - **Duplicate Tokens**: Records with duplicate `card_token` values
 - **Duplicate Card IDs**: Records with duplicate card IDs (Stripe only)
 - **Duplicate External Subscription IDs**: Records with duplicate `subscription_external_id` values
-- **Duplicate Emails**: Records with duplicate `customer_email` values (Production only, skipped in Sandbox mode since emails are anonymized)
+- **Duplicate Emails**: Records with duplicate `customer_email` values (skipped only when email anonymisation is enabled, since anonymised emails become unique)
 
 Duplicate detection runs even if validation checks fail, allowing you to see all potential issues at once. Downloadable reports are available for each duplicate type.
 
@@ -317,7 +316,7 @@ The migration process generates several CSV files:
 - **`*_duplicate_tokens.csv`**: Records with duplicate payment tokens (warning, not a validation failure)
 - **`*_duplicate_card_ids.csv`**: Records with duplicate card IDs (Stripe only, warning, not a validation failure)
 - **`*_duplicate_external_subscription_ids.csv`**: Records with duplicate subscription IDs (warning, not a validation failure)
-- **`*_duplicate_emails.csv`**: Records with duplicate email addresses (Production only, skipped in Sandbox, warning, not a validation failure)
+- **`*_duplicate_emails.csv`**: Records with duplicate email addresses (skipped when email anonymisation is enabled; warning, not a validation failure)
 - **`*_unsupported_countries.csv`**: Records with unsupported country codes
 - **`*_invalid_date_formats.csv`**: Records with incorrect date formats
 - **`*_invalid_date_periods.csv`**: Records with invalid date periods
@@ -332,14 +331,16 @@ The migration process generates several CSV files:
 The unified Python script can also be used directly:
 
 ```bash
-python migration-import-unified.py subscriber_file.csv mapping_file.csv vault_provider_name [--sandbox]
+python migration-import-unified.py subscriber_file.csv mapping_file.csv vault_provider_name [--sandbox] [--anonymise-email]
 ```
+
+Use `--anonymise-email` together with `--sandbox` to replace customer emails with blackhole addresses. Without `--anonymise-email`, sandbox runs keep real emails and duplicate email detection runs as in production.
 
 ### Script Features
 
 - **Function-based API**: Can be imported and called from other Python code
 - **File Object Support**: Accepts both file paths and file objects
-- **Environment Toggle**: Sandbox mode with data anonymization
+- **Environment Toggle**: Sandbox mode with optional email anonymisation (`--anonymise-email`)
 - **Comprehensive Logging**: Detailed processing information
 - **Error Handling**: Robust error handling and validation
 
@@ -428,7 +429,7 @@ The application includes comprehensive error handling:
 
 ## Security Considerations
 
-- **Sandbox Mode**: Automatically anonymizes sensitive data
+- **Sandbox Mode**: Optionally anonymize email data when sandbox and "Anonymise email addresses" (or `--anonymise-email`) are enabled
 - **File Validation**: Validates file types and content
 - **Error Logging**: Secure error handling without exposing sensitive data
 - **Local Processing**: All processing happens locally, no data sent to external services
