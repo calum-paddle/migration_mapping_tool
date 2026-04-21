@@ -248,8 +248,11 @@ def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=F
 
 def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
     """
-    Validate that current_period_started_at and current_period_ends_at dates are in the correct format
-    - Format must be: YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-07-06T00:00:00Z)
+    Validate date formats for subscription period and lifecycle fields.
+    - current_period_started_at and current_period_ends_at: required; must match
+      YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-07-06T00:00:00Z); empty is invalid.
+    - started_at and paused_at: when present, must match the same pattern; empty
+      or missing values are treated as valid.
     
     Args:
         subscriber_data: DataFrame containing subscriber data
@@ -279,29 +282,43 @@ def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
         # Expected format: YYYY-MM-DDTHH:MM:SSZ (e.g., 2025-07-06T00:00:00Z)
         date_format_pattern = r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$'
         
-        # Check format for both date columns
         # Convert to string, handling NaN values
-        # Note: If dates were already parsed as datetime objects by pandas, 
+        # Note: If dates were already parsed as datetime objects by pandas,
         # we check their string representation. The validation ensures the original
         # CSV format matches the required pattern.
-        def check_date_format(value):
+        def check_date_format_required(value):
             if pd.isna(value):
                 return False
-            # Convert to string
             value_str = str(value)
-            # Check for common NaN representations
             if value_str.lower() in ['nan', 'none', 'nat', '']:
                 return False
-            # Check if it matches the exact required format
             return bool(re.match(date_format_pattern, value_str))
-        
-        started_valid = validation_data['current_period_started_at'].apply(check_date_format)
-        ended_valid = validation_data['current_period_ends_at'].apply(check_date_format)
-        
-        # Find records where either date has incorrect format
-        incorrect_format_mask = ~(started_valid & ended_valid)
+
+        def check_date_format_optional(value):
+            """Same pattern when non-empty; blank/NaN is allowed."""
+            if pd.isna(value):
+                return True
+            value_str = str(value).strip()
+            if value_str.lower() in ['nan', 'none', 'nat', '']:
+                return True
+            return bool(re.match(date_format_pattern, value_str))
+
+        period_started_valid = validation_data['current_period_started_at'].apply(
+            check_date_format_required
+        )
+        period_ended_valid = validation_data['current_period_ends_at'].apply(
+            check_date_format_required
+        )
+
+        incorrect_format_mask = ~(period_started_valid & period_ended_valid)
+
+        for col in ('started_at', 'paused_at'):
+            if col in validation_data.columns:
+                col_valid = validation_data[col].apply(check_date_format_optional)
+                incorrect_format_mask = incorrect_format_mask | ~col_valid
+
         incorrect_records = validation_data[incorrect_format_mask].copy()
-        
+
         # Convert all columns to strings to prevent float conversion in CSV
         if not incorrect_records.empty:
             incorrect_records = clean_dataframe_for_csv(incorrect_records)
