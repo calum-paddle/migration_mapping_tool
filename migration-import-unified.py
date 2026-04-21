@@ -246,6 +246,61 @@ def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=F
                 'unsupported_countries_dict': fallback_dict
             }
 
+def validate_address_country_code_format(subscriber_data, seller_name='', is_sandbox=False):
+    """
+    Validate that address_country_code is present on every row and is exactly
+    two alphabetic characters (ISO 3166-1 alpha-2 style; letters only, any case).
+
+    If the column is missing, returns valid (column validation reports missing headers).
+    """
+    try:
+        validation_data = subscriber_data.copy()
+        if '_temp_row_id' not in validation_data.columns:
+            validation_data['_temp_row_id'] = range(len(validation_data))
+
+        if 'address_country_code' not in validation_data.columns:
+            return {
+                'valid': True,
+                'incorrect_count': 0,
+                'total_records': len(validation_data),
+                'incorrect_records': None
+            }
+
+        def is_valid_alpha2(value):
+            if pd.isna(value):
+                return False
+            s = str(value).strip()
+            if s.lower() in ('nan', 'none', 'nat', ''):
+                return False
+            if len(s) != 2:
+                return False
+            return s.isalpha()
+
+        col = validation_data['address_country_code']
+        valid_mask = col.apply(is_valid_alpha2)
+        incorrect_records = validation_data[~valid_mask].copy()
+
+        if not incorrect_records.empty:
+            incorrect_records = clean_dataframe_for_csv(incorrect_records)
+
+        return {
+            'valid': len(incorrect_records) == 0,
+            'incorrect_count': len(incorrect_records),
+            'incorrect_records': incorrect_records,
+            'total_records': len(validation_data)
+        }
+    except Exception as e:
+        print(f"Error in address country code validation: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'valid': False,
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'incorrect_records': None
+        }
+
 def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
     """
     Validate date formats for subscription period and lifecycle fields.
@@ -833,6 +888,88 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         'optional_columns': validation_result['optional_columns']
         })
     
+    # Address country code format (alpha-2, required on every row)
+    print("Validating address country codes...")
+    address_country_code_validation = None
+    try:
+        address_country_code_validation = validate_address_country_code_format(
+            subscribedata, seller_name, is_sandbox
+        )
+    except Exception as e:
+        print(f"Error during address country code validation: {e}")
+        validation_results.append({
+            'valid': False,
+            'step': 'address_country_code_validation',
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'download_file': None
+        })
+
+    if address_country_code_validation:
+        if not address_country_code_validation['valid']:
+            err = address_country_code_validation.get('error')
+            if err:
+                print(f"Address country code validation failed: {err}")
+            else:
+                print(
+                    f"Address country code validation failed. Found "
+                    f"{address_country_code_validation['incorrect_count']} records with invalid or missing codes."
+                )
+            download_file = None
+            if address_country_code_validation.get('incorrect_records') is not None:
+                try:
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    clean_seller_name = "".join(
+                        c for c in seller_name if c.isalnum() or c in (' ', '-', '_')
+                    ).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = "_sandbox" if is_sandbox else "_production"
+                    incorrect_filename = (
+                        f"{clean_seller_name}_invalid_address_country_codes{env_suffix}_{int(time.time())}.csv"
+                    )
+                    incorrect_path = os.path.join(output_dir, incorrect_filename)
+                    address_country_code_validation['incorrect_records'].to_csv(
+                        incorrect_path, index=False
+                    )
+                    download_file = incorrect_filename
+                    print(f"Saved incorrect records to: {incorrect_path}")
+                except Exception as save_err:
+                    print(f"Error saving incorrect records file: {save_err}")
+
+            if (
+                address_country_code_validation.get('incorrect_records') is not None
+                and '_temp_row_id' in address_country_code_validation['incorrect_records'].columns
+            ):
+                temp_ids = address_country_code_validation['incorrect_records'][
+                    '_temp_row_id'
+                ].replace('', pd.NA).dropna()
+                failed_ids = [
+                    int(float(x)) if str(x).strip() != '' else None for x in temp_ids
+                ]
+                failed_ids = [x for x in failed_ids if x is not None]
+                failed_row_ids.update(failed_ids)
+
+            validation_results.append({
+                'valid': False,
+                'step': 'address_country_code_validation',
+                'incorrect_count': address_country_code_validation['incorrect_count'],
+                'total_records': address_country_code_validation['total_records'],
+                'download_file': download_file,
+                **({'error': address_country_code_validation['error']} if err else {})
+            })
+        else:
+            print(
+                f"Address country code validation passed. All "
+                f"{address_country_code_validation['total_records']} country codes are valid."
+            )
+            validation_results.append({
+                'valid': True,
+                'step': 'address_country_code_validation',
+                'total_records': address_country_code_validation['total_records']
+            })
+
     # Unsupported Countries Validation
     print("Validating unsupported countries...")
     # Ensure _temp_row_id exists for tracking (it should already be added at line 710)

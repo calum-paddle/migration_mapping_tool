@@ -172,7 +172,7 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
       
       // Check if validation failed (old format: single validation failure)
-      if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation' || result.step === 'date_format_validation' || result.step === 'date_validation' || result.step === 'unsupported_countries_validation' || result.step === 'ca_zip_code_validation' || result.step === 'us_zip_code_validation' || result.step === 'missing_zip_code_validation')) {
+      if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation' || result.step === 'date_format_validation' || result.step === 'date_validation' || result.step === 'address_country_code_validation' || result.step === 'unsupported_countries_validation' || result.step === 'ca_zip_code_validation' || result.step === 'us_zip_code_validation' || result.step === 'missing_zip_code_validation')) {
         // Add any previous successful validations first
         if (result.validation_results) {
           const previousValidations = result.validation_results.map(validation => ({
@@ -554,6 +554,7 @@ const FileUpload = ({ onProcessingComplete }) => {
           {currentValidationStep && (
             <div className="validation-progress">
                         {currentValidationStep === 'column_validation' && 'Column validation in progress...'}
+          {currentValidationStep === 'address_country_code_validation' && 'Address country code validation in progress...'}
           {currentValidationStep === 'date_format_validation' && 'Date format validation in progress...'}
           {currentValidationStep === 'date_validation' && 'Date validation in progress...'}
           {currentValidationStep === 'card_token_validation' && 'Bluesnap card token validation in progress...'}
@@ -610,6 +611,8 @@ const FileUpload = ({ onProcessingComplete }) => {
             <span className="validation-title">
               {validation.step === 'column_validation' 
                 ? (validation.valid ? 'Column validation passed' : `Column validation failed${validation.missing_columns ? ` (${validation.missing_columns.length})` : ''}`)
+                : validation.step === 'address_country_code_validation'
+                ? (validation.valid ? 'Address country code validation passed' : `Address country code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'date_format_validation'
                 ? (validation.valid ? 'Date format validation passed' : `Date format validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'date_validation'
@@ -673,6 +676,7 @@ const FileUpload = ({ onProcessingComplete }) => {
           </div>
           {(!isCollapsible || isExpanded) && 
            !(validation.step === 'column_validation' && validation.valid) && 
+           !(validation.step === 'address_country_code_validation' && validation.valid) &&
            !(validation.step === 'date_format_validation' && validation.valid) &&
            !(validation.step === 'date_validation' && validation.valid) &&
            !(validation.step === 'card_token_validation' && validation.valid) &&
@@ -705,6 +709,23 @@ const FileUpload = ({ onProcessingComplete }) => {
                         </ul>
                       </div>
                     )}
+                  </>
+                )}
+              </>
+            ) : validation.step === 'address_country_code_validation' ? (
+              <>
+                {!validation.valid && (
+                  <>
+                    <p>Every row must have an <code>address_country_code</code> value, and it must be exactly two letters (A–Z), for example <code>US</code> or <code>GB</code>. Empty values, numbers, or longer codes are not allowed.</p>
+                    {validation.error && (
+                      <div className="missing-columns">
+                        <p><strong>Error:</strong> {validation.error}</p>
+                      </div>
+                    )}
+                    <div className="missing-columns">
+                      <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} records with invalid or missing country codes.</strong></p>
+                      <p>Click the download icon to get a report of all incorrect records.</p>
+                    </div>
                   </>
                 )}
               </>

@@ -111,7 +111,7 @@ def process_migration_api():
             return jsonify(result)
         
         # Check if validation failed (old format: single validation failure)
-        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation', 'date_format_validation', 'date_validation', 'ca_zip_code_validation', 'us_zip_code_validation', 'missing_zip_code_validation']:
+        if 'error' in result and result.get('step') in ['column_validation', 'card_token_validation', 'date_format_validation', 'date_validation', 'address_country_code_validation', 'unsupported_countries_validation', 'ca_zip_code_validation', 'us_zip_code_validation', 'missing_zip_code_validation']:
             # Clean up uploaded files
             os.remove(subscriber_path)
             os.remove(mapping_path)
