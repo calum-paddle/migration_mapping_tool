@@ -60,6 +60,10 @@ def process_migration_api():
         provider = request.form.get('provider', 'stripe')
         autocorrect_us_zip = request.form.get('autocorrect_us_zip', 'false').lower() == 'true'
         use_mapping_zip_codes = request.form.get('use_mapping_zip_codes', 'false').lower() == 'true'
+        strip_iso_date_fractional_suffix = (
+            request.form.get('strip_iso_date_fractional_suffix', 'false').lower() == 'true'
+            or request.form.get('strip_iso_date_dot000_suffix', 'false').lower() == 'true'
+        )
         
         # Validate files
         if subscriber_file.filename == '':
@@ -100,7 +104,8 @@ def process_migration_api():
             seller_name,
             autocorrect_us_zip,
             use_mapping_zip_codes,
-            anonymise_email
+            anonymise_email,
+            strip_iso_date_fractional_suffix
         )
         
         # Check if validation failed (new format: all validations returned together)

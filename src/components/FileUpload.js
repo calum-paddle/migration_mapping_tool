@@ -18,6 +18,7 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [zipFile, setZipFile] = useState(null);
   const [useMappingZipCodes, setUseMappingZipCodes] = useState(false);
   const [autocorrectUsZipCodes, setAutocorrectUsZipCodes] = useState(false);
+  const [stripIsoDateFractionalSuffix, setStripIsoDateFractionalSuffix] = useState(false);
   const [anonymiseEmailInSandbox, setAnonymiseEmailInSandbox] = useState(false);
 
   const handleFileChange = (e, fileType) => {
@@ -63,7 +64,7 @@ const FileUpload = ({ onProcessingComplete }) => {
     });
   };
 
-  const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, autocorrect = false, useMappingZip = false, anonymiseEmail = false) => {
+  const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, autocorrect = false, useMappingZip = false, anonymiseEmail = false, stripIsoFractional = false) => {
     const formData = new FormData();
     formData.append('subscriber_file', subFile);
     formData.append('mapping_file', mapFile);
@@ -78,6 +79,9 @@ const FileUpload = ({ onProcessingComplete }) => {
       formData.append('use_mapping_zip_codes', 'true');
     }
     formData.append('anonymise_email', sandbox && anonymiseEmail ? 'true' : 'false');
+    if (stripIsoFractional) {
+      formData.append('strip_iso_date_fractional_suffix', 'true');
+    }
 
     try {
       setProcessingStatus('Uploading files...');
@@ -333,7 +337,7 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
       
       // Process the migration with checkbox values
-      await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, autocorrectUsZipCodes, useMappingZipCodes, anonymiseEmailInSandbox);
+      await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, autocorrectUsZipCodes, useMappingZipCodes, anonymiseEmailInSandbox, stripIsoDateFractionalSuffix);
       
     } catch (err) {
       setError('Error processing migration: ' + err.message);
@@ -513,6 +517,23 @@ const FileUpload = ({ onProcessingComplete }) => {
                 <span className="info-icon">ℹ️</span>
                 <div className="tooltip">
                   If any required ZIP codes are missing, use ZIP codes from the mapping file if available.
+                </div>
+              </div>
+            </label>
+          </div>
+          <div className="checkbox-item">
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={stripIsoDateFractionalSuffix}
+                onChange={(e) => setStripIsoDateFractionalSuffix(e.target.checked)}
+                className="checkbox-input"
+              />
+              <span>Normalize ISO date timestamps (fractional seconds)</span>
+              <div className="info-icon-wrapper">
+                <span className="info-icon">ℹ️</span>
+                <div className="tooltip">
+                  For started_at, paused_at, current_period_started_at, and current_period_ends_at: if a value looks like 2026-04-09T10:10:08.000Z or 2026-04-09T10:10:08.123Z (any digits after the dot before Z), remove the fractional part so it becomes 2026-04-09T10:10:08Z. Values without fractional seconds are unchanged.
                 </div>
               </div>
             </label>
@@ -737,7 +758,7 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <>
-                    <p>Every row must have a value in <code>price_id_1</code>, and it must start with <code>pri_</code>. Any optional <code>price_id_2</code>, <code>price_id_3</code>, or further <code>price_id_*</code> columns may be empty; if they contain a value, it must also start with <code>pri_</code>.</p>
+                    <p>Every row must have a value in <code>price_id_1</code> starting with <code>pri_</code>. Quantities must be non-negative whole numbers: values like <code>2.0</code> from spreadsheets are normalized to <code>2</code> before checking. After normalization, each <code>quantity_N</code> must be digits only (no minus sign, no decimal point). For each line index <code>N</code>: if <code>price_id_N</code> is filled, <code>quantity_N</code> must be present and pass this rule (e.g. <code>-1</code> and <code>2.5</code> are invalid). Optional <code>price_id_N</code> values must still start with <code>pri_</code> when non-empty.</p>
                     {validation.error && (
                       <div className="missing-columns">
                         <p><strong>Error:</strong> {validation.error}</p>
@@ -802,8 +823,8 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <>
-                    <p>Records with unsupported country codes are not allowed. The following countries are not supported: {validation.unsupported_countries ? validation.unsupported_countries.join(', ') : 'AF, AQ, BY, MM, CF, CU, CD, HT, IR, LY, ML, AN, NI, KP, RU, SO, SS, SD, SY, VE, YE, ZW'}.</p>
-                    <p>{validation.unsupported_countries_dict ? Object.values(validation.unsupported_countries_dict).join(' ') : '🇦🇫 🇦🇶 🇧🇾 🇲🇲 🇨🇫 🇨🇺 🇨🇩 🇭🇹 🇮🇷 🇱🇾 🇲🇱 🇳🇮 🇰🇵 🇷🇺 🇸🇴 🇸🇸 🇸🇩 🇸🇾 🇻🇪 🇾🇪 🇿🇼'}</p>
+                    <p>Records with unsupported country codes are not allowed. The following countries are not supported: {validation.unsupported_countries ? validation.unsupported_countries.join(', ') : 'AF, AQ, BY, MM, CF, CU, CD, HT, IR, IQ, LY, ML, AN, NI, KP, RU, SO, SS, SD, SY, VE, YE, ZW'}.</p>
+                    <p>{validation.unsupported_countries_dict ? Object.values(validation.unsupported_countries_dict).join(' ') : '🇦🇫 🇦🇶 🇧🇾 🇲🇲 🇨🇫 🇨🇺 🇨🇩 🇭🇹 🇮🇷 🇮🇶 🇱🇾 🇲🇱 🇳🇮 🇰🇵 🇷🇺 🇸🇴 🇸🇸 🇸🇩 🇸🇾 🇻🇪 🇾🇪 🇿🇼'}</p>
                     <div className="missing-columns">
                       <p><strong>Found {validation.incorrect_count} records with unsupported country codes.</strong></p>
                       <p>Click the download icon to get a report of all incorrect records.</p>

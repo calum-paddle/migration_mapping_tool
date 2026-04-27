@@ -233,7 +233,7 @@ This automatically:
 The migration process performs comprehensive validation checks in the following order:
 
 1. **Column Validation**: Ensures all required columns are present
-2. **Unsupported Countries Validation**: Checks that `address_country_code` does not contain unsupported countries (AF, AQ, BY, MM, CF, CU, CD, HT, IR, LY, ML, AN, NI, KP, RU, SO, SS, SD, SY, VE, YE, ZW)
+2. **Unsupported Countries Validation**: Checks that `address_country_code` does not contain unsupported countries (AF, AQ, BY, MM, CF, CU, CD, HT, IR, IQ, LY, ML, AN, NI, KP, RU, SO, SS, SD, SY, VE, YE, ZW)
 3. **Date Format Validation**: Validates that `current_period_started_at` and `current_period_ends_at` are in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)
 4. **Date Period Validation**: Ensures date periods are logical (`current_period_started_at` dates should not be in the future, `current_period_ends_at` dates should not be in the past)
 5. **Missing Zip Code Validation**: Checks for missing zip codes in required countries (AU, CA, FR, DE, IN, IT, NL, ES, GB, US). Can optionally pull missing zip codes from the mapping file if the checkbox is enabled
@@ -269,7 +269,7 @@ To change the list of unsupported countries that will cause validation to fail, 
 ```python
 unsupported_countries_dict = {
     'AF': '🇦🇫', 'AQ': '🇦🇶', 'BY': '🇧🇾', 'MM': '🇲🇲', 'CF': '🇨🇫', 'CU': '🇨🇺', 
-    'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
+    'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'IQ': '🇮🇶', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
     'NI': '🇳🇮', 'KP': '🇰🇵', 'RU': '🇷🇺', 'SO': '🇸🇴', 'SS': '🇸🇸', 'SD': '🇸🇩', 
     'SY': '🇸🇾', 'VE': '🇻🇪', 'YE': '🇾🇪', 'ZW': '🇿🇼'
 }

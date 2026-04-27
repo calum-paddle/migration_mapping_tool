@@ -31,6 +31,70 @@ def generate_random_email():
     random_string = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
     return f"blackhole+{random_string}@paddle.com"
 
+_ISO_TIMESTAMP_FRACTIONAL_Z = re.compile(
+    r'^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z$'
+)
+_SUBSCRIBER_DATE_COLS_STRIP_FRACTIONAL_Z = (
+    'started_at',
+    'paused_at',
+    'current_period_started_at',
+    'current_period_ends_at',
+)
+
+
+def strip_iso_fractional_seconds_z_suffixes(subscriber_df, enabled):
+    """
+    When enabled, rewrite values like ...T..:..:..<digits>Z to ...T..:..:..Z
+    only when the full string matches ISO-style UTC with fractional seconds (any length).
+    Values without a fractional part are unchanged. Skips empty cells.
+    Mutates subscriber_df in place.
+    """
+    if not enabled:
+        return
+
+    def fix_cell(value):
+        if pd.isna(value):
+            return value
+        s = str(value).strip()
+        if s.lower() in ('nan', 'none', 'nat', ''):
+            return value
+        if _ISO_TIMESTAMP_FRACTIONAL_Z.match(s):
+            return re.sub(r'\.\d+Z$', 'Z', s, count=1)
+        return value
+
+    for col in _SUBSCRIBER_DATE_COLS_STRIP_FRACTIONAL_Z:
+        if col not in subscriber_df.columns:
+            continue
+        subscriber_df[col] = subscriber_df[col].apply(fix_cell)
+
+_SUB_CUSTOM_KEY_RE = re.compile(r'^subscription_custom_data_key_(\d+)$')
+_SUB_CUSTOM_VALUE_RE = re.compile(r'^subscription_custom_data_value_(\d+)$')
+
+
+def ordered_subscription_custom_data_columns(columns):
+    """
+    Return subscription_custom_data_key_N / value_N columns in ascending N,
+    each pair as key then value (only columns that exist).
+    """
+    col_set = {str(c) for c in columns}
+    indices = set()
+    for c in col_set:
+        m = _SUB_CUSTOM_KEY_RE.match(c)
+        if m:
+            indices.add(int(m.group(1)))
+        m = _SUB_CUSTOM_VALUE_RE.match(c)
+        if m:
+            indices.add(int(m.group(1)))
+    ordered = []
+    for i in sorted(indices):
+        k = f'subscription_custom_data_key_{i}'
+        v = f'subscription_custom_data_value_{i}'
+        if k in col_set:
+            ordered.append(k)
+        if v in col_set:
+            ordered.append(v)
+    return ordered
+
 def validate_subscriber_columns(columns):
     """
     Validate that the subscriber file has all required columns
@@ -77,12 +141,8 @@ def validate_subscriber_columns(columns):
         'discount_remaining_cycles',
         'subscription_custom_data_key_1',
         'subscription_custom_data_value_1',
-        'subscription_custom_data_key_2',
-        'subscription_custom_data_value_2',
         'price_id_1',
-        'quantity_1',
-        'price_id_2',
-        'quantity_2'
+        'quantity_1'
     ]
     
     # Convert columns to list if it's a pandas Index
@@ -176,7 +236,7 @@ def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=F
         # Dictionary of unsupported country codes with their flag emojis
         unsupported_countries_dict = {
             'AF': '🇦🇫', 'AQ': '🇦🇶', 'BY': '🇧🇾', 'MM': '🇲🇲', 'CF': '🇨🇫', 'CU': '🇨🇺', 
-            'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
+            'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'IQ': '🇮🇶', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
             'NI': '🇳🇮', 'KP': '🇰🇵', 'RU': '🇷🇺', 'SO': '🇸🇴', 'SS': '🇸🇸', 'SD': '🇸🇩', 
             'SY': '🇸🇾', 'VE': '🇻🇪', 'YE': '🇾🇪', 'ZW': '🇿🇼'
         }
@@ -232,7 +292,7 @@ def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=F
             # Fallback dictionary if error occurs
             fallback_dict = {
                 'AF': '🇦🇫', 'AQ': '🇦🇶', 'BY': '🇧🇾', 'MM': '🇲🇲', 'CF': '🇨🇫', 'CU': '🇨🇺', 
-                'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
+                'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'IQ': '🇮🇶', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
                 'NI': '🇳🇮', 'KP': '🇰🇵', 'RU': '🇷🇺', 'SO': '🇸🇴', 'SS': '🇸🇸', 'SD': '🇸🇩', 
                 'SY': '🇸🇾', 'VE': '🇻🇪', 'YE': '🇾🇪', 'ZW': '🇿🇼'
             }
@@ -302,26 +362,86 @@ def validate_address_country_code_format(subscriber_data, seller_name='', is_san
         }
 
 _PRICE_ID_COLUMN_RE = re.compile(r'^price_id_\d+$')
+_PRICE_ID_LINE_INDEX_RE = re.compile(r'^price_id_(\d+)$')
+_QUANTITY_LINE_INDEX_RE = re.compile(r'^quantity_(\d+)$')
+
+
+def ordered_price_id_quantity_columns(columns):
+    """
+    Return price_id_N then quantity_N for each index N present in columns (sorted by N).
+    """
+    col_set = {str(c) for c in columns}
+    indices = set()
+    for c in col_set:
+        m = _PRICE_ID_LINE_INDEX_RE.match(c)
+        if m:
+            indices.add(int(m.group(1)))
+        m = _QUANTITY_LINE_INDEX_RE.match(c)
+        if m:
+            indices.add(int(m.group(1)))
+    ordered = []
+    for i in sorted(indices):
+        p = f'price_id_{i}'
+        q = f'quantity_{i}'
+        if p in col_set:
+            ordered.append(p)
+        if q in col_set:
+            ordered.append(q)
+    return ordered
+
+
+def _normalize_subscription_quantity_cell(value):
+    """
+    If the cell is a whole non-negative number (e.g. float 2.0 or string '2.0'), return digit string '2'.
+    Otherwise return the value unchanged (trimmed string for plain strings) so validation can reject.
+    Empty / NaN left unchanged.
+    """
+    if pd.isna(value):
+        return value
+    s = str(value).strip()
+    if s.lower() in ('nan', 'none', 'nat', ''):
+        return value
+    if re.fullmatch(r'\d+', s):
+        return s
+    try:
+        f = float(s)
+    except ValueError:
+        return value
+    if f != f or abs(f) == float('inf'):
+        return value
+    if f < 0:
+        return value
+    i = int(f)
+    if f != float(i):
+        return value
+    return str(i)
 
 
 def validate_price_id_prefix(subscriber_data, seller_name='', is_sandbox=False):
     """
     - price_id_1: required on every row (non-empty after strip); value must start with 'pri_'.
     - Other columns matching price_id_<digits>: optional; if a cell has a value it must start with 'pri_'.
+    - quantity_* columns: whole non-negative numbers like 2.0 are rewritten to 2 (in place on subscriber_data).
+    - For every index N: if price_id_N is non-empty on a row, quantity_N must be one or more ASCII digits only
+      (no sign, no decimal point; e.g. 1, 20, 0).
     If price_id_1 is missing from the dataframe, returns valid (column validation reports missing headers).
     """
     try:
-        validation_data = subscriber_data.copy()
-        if '_temp_row_id' not in validation_data.columns:
-            validation_data['_temp_row_id'] = range(len(validation_data))
-
-        if 'price_id_1' not in validation_data.columns:
+        if 'price_id_1' not in subscriber_data.columns:
             return {
                 'valid': True,
                 'incorrect_count': 0,
-                'total_records': len(validation_data),
+                'total_records': len(subscriber_data),
                 'incorrect_records': None
             }
+
+        for col in list(subscriber_data.columns):
+            if _QUANTITY_LINE_INDEX_RE.match(str(col)):
+                subscriber_data[col] = subscriber_data[col].apply(_normalize_subscription_quantity_cell)
+
+        validation_data = subscriber_data.copy()
+        if '_temp_row_id' not in validation_data.columns:
+            validation_data['_temp_row_id'] = range(len(validation_data))
 
         def normalize_cell(value):
             if pd.isna(value):
@@ -339,12 +459,39 @@ def validate_price_id_prefix(subscriber_data, seller_name='', is_sandbox=False):
             s = normalize_cell(value)
             return s == '' or s.startswith('pri_')
 
+        def is_non_negative_integer_quantity_string(value):
+            s = normalize_cell(value)
+            if s == '':
+                return False
+            return bool(re.fullmatch(r'\d+', s))
+
         invalid_mask = ~validation_data['price_id_1'].apply(price_id_1_ok)
 
         for col in validation_data.columns:
             if col == 'price_id_1' or not _PRICE_ID_COLUMN_RE.match(str(col)):
                 continue
             invalid_mask = invalid_mask | ~validation_data[col].apply(optional_price_id_ok)
+
+        line_indices = set()
+        for c in validation_data.columns:
+            m = _PRICE_ID_LINE_INDEX_RE.match(str(c))
+            if m:
+                line_indices.add(int(m.group(1)))
+            m = _QUANTITY_LINE_INDEX_RE.match(str(c))
+            if m:
+                line_indices.add(int(m.group(1)))
+
+        for i in sorted(line_indices):
+            pcol = f'price_id_{i}'
+            qcol = f'quantity_{i}'
+            if pcol not in validation_data.columns:
+                continue
+            price_nonempty = validation_data[pcol].apply(lambda v: normalize_cell(v) != '')
+            if qcol not in validation_data.columns:
+                invalid_mask = invalid_mask | price_nonempty
+            else:
+                qty_ok = validation_data[qcol].apply(is_non_negative_integer_quantity_string)
+                invalid_mask = invalid_mask | (price_nonempty & ~qty_ok)
 
         incorrect_records = validation_data[invalid_mask].copy()
         if not incorrect_records.empty:
@@ -678,6 +825,24 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
             }  # Fallback if error occurs
         }
 
+# Canada Post: letters D, F, I, O, Q, U never used; W and Z not used as first letter of FSA.
+_CA_POSTAL_LETTER_FIRST = 'ABCEGHJKLMNPRSTVXY'
+_CA_POSTAL_LETTER_OTHER = 'ABCEGHJKLMNPRSTVWXYZ'
+_CA_ZIP_PATTERN = (
+    rf'^[{_CA_POSTAL_LETTER_FIRST}]\d[{_CA_POSTAL_LETTER_OTHER}]'
+    rf' ?\d[{_CA_POSTAL_LETTER_OTHER}]\d$'
+)
+
+
+def _normalize_ca_postal_code_string(value):
+    """Uppercase, trim, collapse internal whitespace (common CSV issues)."""
+    if pd.isna(value):
+        return ''
+    s = str(value).strip().upper()
+    s = re.sub(r'\s+', ' ', s)
+    return s
+
+
 def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
     """
     Validate Canadian zip codes for records with address_country_code = 'CA'
@@ -691,8 +856,9 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
         dict: Validation results with status and incorrect records
     """
     try:
-        # Filter for Canadian records
-        ca_records = data[data['address_country_code'] == 'CA'].copy()
+        # Filter for Canadian records (case-insensitive country code)
+        ca_mask = data['address_country_code'].astype(str).str.strip().str.upper() == 'CA'
+        ca_records = data[ca_mask].copy()
         
         if len(ca_records) == 0:
             return {
@@ -701,11 +867,6 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
                 'total_records': 0,
                 'incorrect_records': None
             }
-        
-        # Canadian zip code regex pattern
-        # Format: Letter-Number-Letter Number-Letter-Number (e.g., A1A 1A1)
-        # Letters exclude D, F, I, O, Q, U, W, Z
-        ca_zip_pattern = r'^[A-CEGHJ-NPR-TV-Z]\d[A-CEGHJ-NPR-TV-Z] ?\d[A-CEGHJ-NPR-TV-Z]\d$'
         
         # Filter out missing/empty zip codes (those are handled by missing zip code validation)
         # Only validate format for records that have zip codes
@@ -722,10 +883,10 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
                 'incorrect_records': None
             }
         
+        normalized_zip = ca_records_with_zip['address_postal_code'].apply(_normalize_ca_postal_code_string)
         # Check zip codes format (only for records that have zip codes)
-        # Strip whitespace before matching to handle zip codes with leading/trailing spaces
         invalid_zip_codes = ca_records_with_zip[
-            ~ca_records_with_zip['address_postal_code'].astype(str).str.strip().str.match(ca_zip_pattern, case=False)
+            ~normalized_zip.str.match(_CA_ZIP_PATTERN, case=False)
         ].copy()
         
         # Convert all columns to strings to prevent float conversion in CSV
@@ -854,7 +1015,7 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
             'autocorrectable_count': 0
         }
 
-def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', autocorrect_us_zip=False, use_mapping_zip_codes=False, anonymise_email=False):
+def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', autocorrect_us_zip=False, use_mapping_zip_codes=False, anonymise_email=False, strip_iso_date_fractional_suffix=False):
     """
     Process migration from payment providers to Paddle Billing
     
@@ -866,6 +1027,7 @@ def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=
         provider: String indicating the payment provider ('stripe' or 'bluesnap')
         seller_name: Name of the seller for file naming
         anonymise_email: Boolean; when True and is_sandbox, customer emails are anonymised (blackhole addresses)
+        strip_iso_date_fractional_suffix: When True, strip fractional seconds (...T..:..:..<ms>Z to ...T..:..:..Z) on subscriber date columns
     
     Returns:
         dict: Processing results and file information
@@ -954,7 +1116,13 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         'total_columns': validation_result['total_columns'],
         'optional_columns': validation_result['optional_columns']
         })
-    
+
+    if strip_iso_date_fractional_suffix:
+        print(
+            "Normalizing subscriber date columns: stripping fractional seconds (.digitsZ) where the full value matches that pattern..."
+        )
+        strip_iso_fractional_seconds_z_suffixes(subscribedata, True)
+
     # Address country code format (alpha-2, required on every row)
     print("Validating address country codes...")
     address_country_code_validation = None
@@ -1128,7 +1296,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         # Fallback dictionary if error occurs
         fallback_dict = {
             'AF': '🇦🇫', 'AQ': '🇦🇶', 'BY': '🇧🇾', 'MM': '🇲🇲', 'CF': '🇨🇫', 'CU': '🇨🇺', 
-            'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
+            'CD': '🇨🇩', 'HT': '🇭🇹', 'IR': '🇮🇷', 'IQ': '🇮🇶', 'LY': '🇱🇾', 'ML': '🇲🇱', 'AN': '🇦🇳', 
             'NI': '🇳🇮', 'KP': '🇰🇵', 'RU': '🇷🇺', 'SO': '🇸🇴', 'SS': '🇸🇸', 'SD': '🇸🇩', 
             'SY': '🇸🇾', 'VE': '🇻🇪', 'YE': '🇾🇪', 'ZW': '🇿🇼'
         }
@@ -1776,14 +1944,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             'subscription_external_id',
             'discount_id',
             'discount_remaining_cycles',
-            'subscription_custom_data_key_1',
-            'subscription_custom_data_value_1',
-            'subscription_custom_data_key_2',
-            'subscription_custom_data_value_2',
-            'price_id_1',
-            'quantity_1',
-            'price_id_2',
-            'quantity_2',
+        ] + ordered_subscription_custom_data_columns(completed.columns) + ordered_price_id_quantity_columns(completed.columns) + [
             'vault_provider'
         ]
         
@@ -1848,14 +2009,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             'subscription_external_id',
             'discount_id',
             'discount_remaining_cycles',
-            'subscription_custom_data_key_1',
-            'subscription_custom_data_value_1',
-            'subscription_custom_data_key_2',
-            'subscription_custom_data_value_2',
-            'price_id_1',
-            'quantity_1',
-            'price_id_2',
-            'quantity_2',
+        ] + ordered_subscription_custom_data_columns(completed.columns) + ordered_price_id_quantity_columns(completed.columns) + [
             'vault_provider'
         ]
     
