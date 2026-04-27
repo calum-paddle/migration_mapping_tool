@@ -301,6 +301,73 @@ def validate_address_country_code_format(subscriber_data, seller_name='', is_san
             'incorrect_records': None
         }
 
+_PRICE_ID_COLUMN_RE = re.compile(r'^price_id_\d+$')
+
+
+def validate_price_id_prefix(subscriber_data, seller_name='', is_sandbox=False):
+    """
+    - price_id_1: required on every row (non-empty after strip); value must start with 'pri_'.
+    - Other columns matching price_id_<digits>: optional; if a cell has a value it must start with 'pri_'.
+    If price_id_1 is missing from the dataframe, returns valid (column validation reports missing headers).
+    """
+    try:
+        validation_data = subscriber_data.copy()
+        if '_temp_row_id' not in validation_data.columns:
+            validation_data['_temp_row_id'] = range(len(validation_data))
+
+        if 'price_id_1' not in validation_data.columns:
+            return {
+                'valid': True,
+                'incorrect_count': 0,
+                'total_records': len(validation_data),
+                'incorrect_records': None
+            }
+
+        def normalize_cell(value):
+            if pd.isna(value):
+                return ''
+            s = str(value).strip()
+            if s.lower() in ('nan', 'none', 'nat', ''):
+                return ''
+            return s
+
+        def price_id_1_ok(value):
+            s = normalize_cell(value)
+            return s != '' and s.startswith('pri_')
+
+        def optional_price_id_ok(value):
+            s = normalize_cell(value)
+            return s == '' or s.startswith('pri_')
+
+        invalid_mask = ~validation_data['price_id_1'].apply(price_id_1_ok)
+
+        for col in validation_data.columns:
+            if col == 'price_id_1' or not _PRICE_ID_COLUMN_RE.match(str(col)):
+                continue
+            invalid_mask = invalid_mask | ~validation_data[col].apply(optional_price_id_ok)
+
+        incorrect_records = validation_data[invalid_mask].copy()
+        if not incorrect_records.empty:
+            incorrect_records = clean_dataframe_for_csv(incorrect_records)
+
+        return {
+            'valid': len(incorrect_records) == 0,
+            'incorrect_count': len(incorrect_records),
+            'incorrect_records': incorrect_records,
+            'total_records': len(validation_data)
+        }
+    except Exception as e:
+        print(f"Error in price ID validation: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'valid': False,
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'incorrect_records': None
+        }
+
 def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
     """
     Validate date formats for subscription period and lifecycle fields.
@@ -968,6 +1035,86 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 'valid': True,
                 'step': 'address_country_code_validation',
                 'total_records': address_country_code_validation['total_records']
+            })
+
+    # Price ID format (pri_ prefix; price_id_1 required)
+    print("Validating price IDs...")
+    price_id_validation = None
+    try:
+        price_id_validation = validate_price_id_prefix(subscribedata, seller_name, is_sandbox)
+    except Exception as e:
+        print(f"Error during price ID validation: {e}")
+        validation_results.append({
+            'valid': False,
+            'step': 'price_id_validation',
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'download_file': None
+        })
+
+    if price_id_validation:
+        if not price_id_validation['valid']:
+            err = price_id_validation.get('error')
+            if err:
+                print(f"Price ID validation failed: {err}")
+            else:
+                print(
+                    f"Price ID validation failed. Found "
+                    f"{price_id_validation['incorrect_count']} records with invalid price IDs."
+                )
+            download_file = None
+            if price_id_validation.get('incorrect_records') is not None:
+                try:
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    clean_seller_name = "".join(
+                        c for c in seller_name if c.isalnum() or c in (' ', '-', '_')
+                    ).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = "_sandbox" if is_sandbox else "_production"
+                    incorrect_filename = (
+                        f"{clean_seller_name}_invalid_price_ids{env_suffix}_{int(time.time())}.csv"
+                    )
+                    incorrect_path = os.path.join(output_dir, incorrect_filename)
+                    price_id_validation['incorrect_records'].to_csv(
+                        incorrect_path, index=False
+                    )
+                    download_file = incorrect_filename
+                    print(f"Saved incorrect records to: {incorrect_path}")
+                except Exception as save_err:
+                    print(f"Error saving incorrect records file: {save_err}")
+
+            if (
+                price_id_validation.get('incorrect_records') is not None
+                and '_temp_row_id' in price_id_validation['incorrect_records'].columns
+            ):
+                temp_ids = price_id_validation['incorrect_records'][
+                    '_temp_row_id'
+                ].replace('', pd.NA).dropna()
+                failed_ids = [
+                    int(float(x)) if str(x).strip() != '' else None for x in temp_ids
+                ]
+                failed_ids = [x for x in failed_ids if x is not None]
+                failed_row_ids.update(failed_ids)
+
+            validation_results.append({
+                'valid': False,
+                'step': 'price_id_validation',
+                'incorrect_count': price_id_validation['incorrect_count'],
+                'total_records': price_id_validation['total_records'],
+                'download_file': download_file,
+                **({'error': price_id_validation['error']} if err else {})
+            })
+        else:
+            print(
+                f"Price ID validation passed for all "
+                f"{price_id_validation['total_records']} records."
+            )
+            validation_results.append({
+                'valid': True,
+                'step': 'price_id_validation',
+                'total_records': price_id_validation['total_records']
             })
 
     # Unsupported Countries Validation
