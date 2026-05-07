@@ -6,6 +6,7 @@ import os
 import time
 import zipfile
 import re
+import unicodedata
 
 def clean_dataframe_for_csv(df):
     """
@@ -330,52 +331,6 @@ def validate_subscriber_columns(columns):
         'required_columns_count': len(required_columns)
     }
 
-def validate_bluesnap_card_tokens(subscriber_data, seller_name='', is_sandbox=False):
-    """
-    Validate that Bluesnap card tokens are exactly 13 numerical characters. Currently not used as this isn't always necessary!
-    
-    Args:
-        subscriber_data: DataFrame containing subscriber data
-        seller_name: Name of the seller for file naming
-        is_sandbox: Boolean indicating if this is sandbox mode
-    
-    Returns:
-        dict: Validation results with status and incorrect records
-    """
-    try:
-        # Check if card_token column exists
-        if 'card_token' not in subscriber_data.columns:
-            return {
-                'valid': False,
-                'error': 'card_token column not found',
-                'incorrect_count': 0,
-                'incorrect_records': None
-            }
-        
-        # Filter out rows where card_token is null/empty
-        valid_data = subscriber_data[subscriber_data['card_token'].notna() & (subscriber_data['card_token'] != '')]
-        
-        # Check each card_token for exactly 13 numerical characters
-        pattern = r'^\d{13}$'
-        incorrect_mask = ~valid_data['card_token'].astype(str).str.match(pattern)
-        incorrect_records = valid_data[incorrect_mask]
-        
-        return {
-            'valid': len(incorrect_records) == 0,
-            'incorrect_count': len(incorrect_records),
-            'incorrect_records': incorrect_records,
-            'total_records': len(valid_data)
-        }
-    except Exception as e:
-        print(f"Error in card token validation: {e}")
-        return {
-            'valid': False,
-            'error': f'Validation error: {str(e)}',
-            'incorrect_count': 0,
-            'total_records': 0,
-            'download_file': None
-        }
-
 def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=False):
     """
     Validate that address_country_code does not contain unsupported countries.
@@ -676,6 +631,171 @@ def validate_price_id_prefix(subscriber_data, seller_name='', is_sandbox=False):
             'total_records': 0,
             'incorrect_records': None
         }
+
+
+def _subscriber_presence_cell_empty(value):
+    """True if a subscription CSV cell has no usable non-empty value (presence checks)."""
+    if pd.isna(value):
+        return True
+    s = str(value).strip()
+    if s == '':
+        return True
+    if s.lower() in ('nan', 'none', 'nat'):
+        return True
+    return False
+
+
+def _resolve_subscriber_column_case_insensitive(subscriber_data, logical_name):
+    """Match template columns when headers differ only by case or outer whitespace (e.g. Status vs status)."""
+    want = logical_name.strip().lower()
+    for c in subscriber_data.columns:
+        if str(c).strip().lower() == want:
+            return c
+    return None
+
+
+def _validate_subscriber_column_presence(subscriber_data, column_name):
+    """
+    Every row must have a non-empty value in column_name.
+    If the column is missing, returns valid True (column_validation reports missing headers).
+    """
+    try:
+        if column_name not in subscriber_data.columns:
+            return {
+                'valid': True,
+                'incorrect_count': 0,
+                'total_records': len(subscriber_data),
+                'incorrect_records': None,
+                'failed_temp_row_ids': [],
+            }
+
+        validation_data = subscriber_data.copy()
+        if '_temp_row_id' not in validation_data.columns:
+            validation_data['_temp_row_id'] = range(len(validation_data))
+
+        empty_mask = validation_data[column_name].apply(_subscriber_presence_cell_empty)
+        incorrect_records = validation_data[empty_mask].copy()
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
+        if not incorrect_records.empty:
+            incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
+
+        return {
+            'valid': len(incorrect_records) == 0,
+            'incorrect_count': len(incorrect_records),
+            'incorrect_records': incorrect_records,
+            'failed_temp_row_ids': failed_temp_row_ids,
+            'total_records': len(validation_data),
+        }
+    except Exception as e:
+        print(f"Error in {column_name} presence validation: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'valid': False,
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'incorrect_records': None,
+            'failed_temp_row_ids': [],
+        }
+
+
+def validate_card_token_presence(subscriber_data, seller_name='', is_sandbox=False):
+    """Every row must have a non-empty card_token before merge (Stripe / BlueSnap join key)."""
+    return _validate_subscriber_column_presence(subscriber_data, 'card_token')
+
+
+_ALLOWED_SUBSCRIPTION_STATUSES = frozenset({'active', 'trialing', 'paused'})
+
+
+def _normalized_subscription_status(value):
+    """Lowercase stripped status token, or '' if empty/missing."""
+    if _subscriber_presence_cell_empty(value):
+        return ''
+    s = str(value).strip()
+    s = s.lstrip('\ufeff')
+    s = unicodedata.normalize('NFKC', s).strip().lower()
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+
+def validate_subscription_status(subscriber_data, seller_name='', is_sandbox=False):
+    """
+    Each row's status must be non-empty and one of: active, trialing, paused (case-insensitive).
+    Paused rows are valid for processing; callers may report them separately as an alert (not excluded).
+    If the status column is missing, returns valid True (column_validation reports missing headers).
+    """
+    try:
+        status_col = _resolve_subscriber_column_case_insensitive(subscriber_data, 'status')
+        if status_col is None:
+            return {
+                'valid': True,
+                'incorrect_count': 0,
+                'total_records': len(subscriber_data),
+                'incorrect_records': None,
+                'failed_temp_row_ids': [],
+                'paused_records': None,
+                'paused_count': 0,
+            }
+
+        validation_data = subscriber_data.copy()
+        if '_temp_row_id' not in validation_data.columns:
+            validation_data['_temp_row_id'] = range(len(validation_data))
+
+        norm_series = validation_data[status_col].apply(_normalized_subscription_status)
+        invalid_mask = ~norm_series.isin(_ALLOWED_SUBSCRIPTION_STATUSES)
+        incorrect_records = validation_data[invalid_mask].copy()
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
+
+        paused_mask = norm_series == 'paused'
+        paused_records = validation_data[paused_mask].copy()
+        paused_count = len(paused_records)
+
+        incorrect_count = len(incorrect_records)
+        if not incorrect_records.empty:
+            incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
+        else:
+            incorrect_records = None
+
+        if not paused_records.empty:
+            paused_records = clean_dataframe_for_validation_report_csv(paused_records)
+        else:
+            paused_records = None
+
+        return {
+            'valid': incorrect_count == 0,
+            'incorrect_count': incorrect_count,
+            'incorrect_records': incorrect_records,
+            'failed_temp_row_ids': failed_temp_row_ids,
+            'total_records': len(validation_data),
+            'paused_records': paused_records,
+            'paused_count': paused_count,
+        }
+    except Exception as e:
+        print(f"Error in status validation: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            'valid': False,
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'incorrect_records': None,
+            'failed_temp_row_ids': [],
+            'paused_records': None,
+            'paused_count': 0,
+        }
+
+
+# (column_name, validation_results step key, filename slug before env_suffix)
+_SUBSCRIBER_FIELD_PRESENCE_CHECKS = (
+    ('customer_email', 'customer_email_presence_validation', 'missing_customer_email_values'),
+    ('status', 'status_presence_validation', 'invalid_status_values'),
+    ('currency_code', 'currency_code_presence_validation', 'missing_currency_code_values'),
+    ('collection_mode', 'collection_mode_presence_validation', 'missing_collection_mode_values'),
+    ('subscription_external_id', 'subscription_external_id_presence_validation', 'missing_subscription_external_id_values'),
+)
+
 
 def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
     """
@@ -1449,6 +1569,199 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 'total_records': price_id_validation['total_records']
             })
 
+    # Card token presence (non-empty value per row before merge)
+    print("Validating card token values...")
+    card_token_presence_validation = None
+    try:
+        card_token_presence_validation = validate_card_token_presence(
+            subscribedata, seller_name, is_sandbox
+        )
+    except Exception as e:
+        print(f"Error during card token presence validation: {e}")
+        validation_results.append({
+            'valid': False,
+            'step': 'card_token_presence_validation',
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'download_file': None
+        })
+
+    if card_token_presence_validation:
+        if not card_token_presence_validation['valid']:
+            err = card_token_presence_validation.get('error')
+            if err:
+                print(f"Card token presence validation failed: {err}")
+            else:
+                print(
+                    f"Card token presence validation failed. Found "
+                    f"{card_token_presence_validation['incorrect_count']} records with missing card_token."
+                )
+            download_file = None
+            if card_token_presence_validation.get('incorrect_records') is not None:
+                try:
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    clean_seller_name = "".join(
+                        c for c in seller_name if c.isalnum() or c in (' ', '-', '_')
+                    ).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = "_sandbox" if is_sandbox else "_production"
+                    incorrect_filename = (
+                        f"{clean_seller_name}_missing_card_token_values{env_suffix}_{int(time.time())}.csv"
+                    )
+                    incorrect_path = os.path.join(output_dir, incorrect_filename)
+                    card_token_presence_validation['incorrect_records'].to_csv(
+                        incorrect_path, index=False
+                    )
+                    download_file = incorrect_filename
+                    print(f"Saved incorrect records to: {incorrect_path}")
+                except Exception as save_err:
+                    print(f"Error saving incorrect records file: {save_err}")
+
+            merge_failed_temp_row_ids_into_set(failed_row_ids, card_token_presence_validation)
+
+            validation_results.append({
+                'valid': False,
+                'step': 'card_token_presence_validation',
+                'incorrect_count': card_token_presence_validation['incorrect_count'],
+                'total_records': card_token_presence_validation['total_records'],
+                'download_file': download_file,
+                **({'error': card_token_presence_validation['error']} if err else {})
+            })
+        else:
+            print(
+                f"Card token presence validation passed for all "
+                f"{card_token_presence_validation['total_records']} records."
+            )
+            validation_results.append({
+                'valid': True,
+                'step': 'card_token_presence_validation',
+                'total_records': card_token_presence_validation['total_records']
+            })
+
+    # Individual subscriber column presence checks (separate reports / UI steps)
+    for column_name, step_key, file_slug in _SUBSCRIBER_FIELD_PRESENCE_CHECKS:
+        if column_name == 'status':
+            print("Validating status (must be active, trialing, or paused)...")
+        else:
+            print(f"Validating {column_name} (non-empty values)...")
+        col_validation = None
+        try:
+            if column_name == 'status':
+                col_validation = validate_subscription_status(subscribedata, seller_name, is_sandbox)
+            else:
+                col_validation = _validate_subscriber_column_presence(subscribedata, column_name)
+        except Exception as e:
+            print(f"Error during {column_name} presence validation: {e}")
+            validation_results.append({
+                'valid': False,
+                'step': step_key,
+                'error': f'Validation error: {str(e)}',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'download_file': None
+            })
+            continue
+
+        if not col_validation['valid']:
+            err = col_validation.get('error')
+            if err:
+                print(f"{column_name} validation failed: {err}")
+            elif column_name == 'status':
+                print(
+                    f"Status validation failed. Found "
+                    f"{col_validation['incorrect_count']} records with invalid or missing status."
+                )
+            else:
+                print(
+                    f"{column_name} presence validation failed. Found "
+                    f"{col_validation['incorrect_count']} records with missing values."
+                )
+            download_file = None
+            if col_validation.get('incorrect_records') is not None:
+                try:
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    clean_seller_name = "".join(
+                        c for c in seller_name if c.isalnum() or c in (' ', '-', '_')
+                    ).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = "_sandbox" if is_sandbox else "_production"
+                    incorrect_filename = (
+                        f"{clean_seller_name}_{file_slug}{env_suffix}_{int(time.time())}.csv"
+                    )
+                    incorrect_path = os.path.join(output_dir, incorrect_filename)
+                    col_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                    download_file = incorrect_filename
+                    print(f"Saved incorrect records to: {incorrect_path}")
+                except Exception as save_err:
+                    print(f"Error saving incorrect records file: {save_err}")
+
+            merge_failed_temp_row_ids_into_set(failed_row_ids, col_validation)
+
+            validation_results.append({
+                'valid': False,
+                'step': step_key,
+                'incorrect_count': col_validation['incorrect_count'],
+                'total_records': col_validation['total_records'],
+                'download_file': download_file,
+                **({'error': col_validation['error']} if err else {})
+            })
+        else:
+            if column_name == 'status':
+                print(
+                    f"Status validation passed for all "
+                    f"{col_validation['total_records']} records."
+                )
+            else:
+                print(
+                    f"{column_name} presence validation passed for all "
+                    f"{col_validation['total_records']} records."
+                )
+            validation_results.append({
+                'valid': True,
+                'step': step_key,
+                'total_records': col_validation['total_records']
+            })
+
+        # Paused subscriptions: warn whenever any row is paused, even if status validation failed
+        # on other rows (invalid / empty statuses still produce the red failure box above).
+        if column_name == 'status':
+            paused_count = col_validation.get('paused_count') or 0
+            paused_df = col_validation.get('paused_records')
+            if paused_count > 0:
+                download_paused = None
+                if paused_df is not None and not paused_df.empty:
+                    try:
+                        output_dir = 'outputs'
+                        os.makedirs(output_dir, exist_ok=True)
+                        clean_seller_name = "".join(
+                            c for c in seller_name if c.isalnum() or c in (' ', '-', '_')
+                        ).rstrip()
+                        clean_seller_name = clean_seller_name.replace(' ', '_')
+                        env_suffix = "_sandbox" if is_sandbox else "_production"
+                        paused_filename = (
+                            f"{clean_seller_name}_paused_status_records{env_suffix}_{int(time.time())}.csv"
+                        )
+                        paused_path = os.path.join(output_dir, paused_filename)
+                        paused_df.to_csv(paused_path, index=False)
+                        download_paused = paused_filename
+                        print(f"Saved paused status report to: {paused_path}")
+                    except Exception as save_err:
+                        print(f"Error saving paused status report: {save_err}")
+                validation_results.append({
+                    'valid': True,
+                    'step': 'status_paused_warning',
+                    'type': 'warning',
+                    'count': paused_count,
+                    'download_file': download_paused,
+                    'message': (
+                        f'Found {paused_count} subscription row(s) with status paused. '
+                        'This is an informational alert only, subscriptions will still be included.'
+                    ),
+                })
+
     # Unsupported Countries Validation
     print("Validating unsupported countries...")
     # Ensure _temp_row_id exists for tracking (it should already be added at line 710)
@@ -1520,76 +1833,6 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 'unsupported_countries': unsupported_countries_validation.get('unsupported_countries', []),
                 'unsupported_countries_dict': unsupported_countries_validation.get('unsupported_countries_dict', {})
             })
-    
-    # Bluesnap card token validation (only for Bluesnap provider)
-    # COMMENTED OUT: Skipping card token length validation
-    # if provider.lower() == 'bluesnap':
-    #     print("Validating Bluesnap card tokens...")
-    #     try:
-    #         card_token_validation = validate_bluesnap_card_tokens(subscribedata, seller_name, is_sandbox)
-    #     except Exception as e:
-    #         print(f"Error during card token validation: {e}")
-    #         return {
-    #             'error': 'Card token validation error',
-    #             'validation_result': {
-    #                 'valid': False,
-    #                 'error': f'Validation error: {str(e)}',
-    #                 'incorrect_count': 0,
-    #                 'total_records': 0,
-    #                 'download_file': None
-    #             },
-    #             'step': 'card_token_validation',
-    #             'validation_results': validation_results  # Include previous successful validations
-    #         }
-    #     
-    #     if not card_token_validation['valid']:
-    #         print(f"Card token validation failed. Found {card_token_validation['incorrect_count']} incorrect formats.")
-    #         
-    #         # Save incorrect records to a file for download
-    #         if card_token_validation['incorrect_records'] is not None:
-    #             try:
-    #                 # Use the same output directory as the server
-    #                 output_dir = 'outputs'
-    #                 os.makedirs(output_dir, exist_ok=True)
-    #                 
-    #                 # Create filename with seller name and environment
-    #                 clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
-    #                 clean_seller_name = clean_seller_name.replace(' ', '_')
-    #                 env_suffix = "_sandbox" if is_sandbox else "_production"
-    #                 incorrect_filename = f"{clean_seller_name}_incorrect_card_tokens{env_suffix}_{int(time.time())}.csv"
-    #                 incorrect_path = os.path.join(output_dir, incorrect_filename)
-    #                 card_token_validation['incorrect_records'].to_csv(incorrect_path, index=False)
-    #                 card_token_validation['download_file'] = incorrect_filename
-    #                 print(f"Saved incorrect records to: {incorrect_path}")
-    #                 print(f"File exists after save: {os.path.exists(incorrect_path)}")
-    #             except Exception as e:
-    #                 print(f"Error saving incorrect records file: {e}")
-    #                 # Continue without download file if saving fails
-    #                 card_token_validation['download_file'] = None
-    #         
-    #         # Convert DataFrame to list of dictionaries for JSON serialization
-    #         validation_result_for_json = {
-    #             'valid': card_token_validation['valid'],
-    #             'incorrect_count': card_token_validation['incorrect_count'],
-    #             'total_records': card_token_validation['total_records'],
-    #             'download_file': card_token_validation.get('download_file')
-    #         }
-    #         
-    #         return {
-    #             'error': 'Card token validation failed',
-    #             'validation_result': validation_result_for_json,
-    #             'step': 'card_token_validation',
-    #             'validation_results': validation_results  # Include previous successful validations
-    #         }
-    #     
-    #     print(f"Card token validation passed. All {card_token_validation['total_records']} card tokens are correctly formatted.")
-    #     
-    #     # Add successful card token validation to results
-    #     validation_results.append({
-    #         'valid': True,
-    #         'step': 'card_token_validation',
-    #         'total_records': card_token_validation['total_records']
-    #     })
     
     # Date format validation (for all providers) - must be before date period validation
     print("Validating date formats...")

@@ -1,5 +1,24 @@
 import React, { useState } from 'react';
 
+/** Steps returned when the API uses the legacy single-error payload (one failing step per response). */
+const LEGACY_SINGLE_STEP_VALIDATION_STEPS = [
+  'column_validation',
+  'card_token_presence_validation',
+  'customer_email_presence_validation',
+  'status_presence_validation',
+  'currency_code_presence_validation',
+  'collection_mode_presence_validation',
+  'subscription_external_id_presence_validation',
+  'date_format_validation',
+  'date_validation',
+  'address_country_code_validation',
+  'price_id_validation',
+  'unsupported_countries_validation',
+  'ca_zip_code_validation',
+  'us_zip_code_validation',
+  'missing_zip_code_validation',
+];
+
 const FileUpload = ({ onProcessingComplete }) => {
   const [subscriberFile, setSubscriberFile] = useState(null);
   const [mappingFile, setMappingFile] = useState(null);
@@ -176,7 +195,7 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
       
       // Check if validation failed (old format: single validation failure)
-      if (result.error && (result.step === 'column_validation' || result.step === 'card_token_validation' || result.step === 'date_format_validation' || result.step === 'date_validation' || result.step === 'address_country_code_validation' || result.step === 'price_id_validation' || result.step === 'unsupported_countries_validation' || result.step === 'ca_zip_code_validation' || result.step === 'us_zip_code_validation' || result.step === 'missing_zip_code_validation')) {
+      if (result.error && LEGACY_SINGLE_STEP_VALIDATION_STEPS.includes(result.step)) {
         // Add any previous successful validations first
         if (result.validation_results) {
           const previousValidations = result.validation_results.map(validation => ({
@@ -529,7 +548,7 @@ const FileUpload = ({ onProcessingComplete }) => {
                 onChange={(e) => setStripIsoDateFractionalSuffix(e.target.checked)}
                 className="checkbox-input"
               />
-              <span>Normalise and remove fractional seconds from dates (common Stripe format)</span>
+              <span>Remove fractional seconds from dates (common Stripe format)</span>
               <div className="info-icon-wrapper">
                 <span className="info-icon">ℹ️</span>
                 <div className="tooltip">
@@ -577,9 +596,14 @@ const FileUpload = ({ onProcessingComplete }) => {
                         {currentValidationStep === 'column_validation' && 'Column validation in progress...'}
           {currentValidationStep === 'address_country_code_validation' && 'Address country code validation in progress...'}
           {currentValidationStep === 'price_id_validation' && 'Price ID validation in progress...'}
+          {currentValidationStep === 'card_token_presence_validation' && 'Card token (required value) validation in progress...'}
+          {currentValidationStep === 'customer_email_presence_validation' && 'Customer email validation in progress...'}
+          {currentValidationStep === 'status_presence_validation' && 'Status validation (active, trialing, or paused) in progress...'}
+          {currentValidationStep === 'currency_code_presence_validation' && 'Currency code validation in progress...'}
+          {currentValidationStep === 'collection_mode_presence_validation' && 'Collection mode validation in progress...'}
+          {currentValidationStep === 'subscription_external_id_presence_validation' && 'Subscription external ID validation in progress...'}
           {currentValidationStep === 'date_format_validation' && 'Date format validation in progress...'}
           {currentValidationStep === 'date_validation' && 'Date validation in progress...'}
-          {currentValidationStep === 'card_token_validation' && 'Bluesnap card token validation in progress...'}
           {currentValidationStep === 'ca_zip_code_validation' && 'Canadian zip code validation in progress...'}
           {currentValidationStep === 'us_zip_code_validation' && 'US zip code validation in progress...'}
           {currentValidationStep === 'missing_zip_code_validation' && 'Missing zip code validation in progress...'}
@@ -637,12 +661,22 @@ const FileUpload = ({ onProcessingComplete }) => {
                 ? (validation.valid ? 'Address country code validation passed' : `Address country code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'price_id_validation'
                 ? (validation.valid ? 'Price ID validation passed' : `Price ID validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                : validation.step === 'card_token_presence_validation'
+                ? (validation.valid ? 'Card token value validation passed' : `Card token value validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                : validation.step === 'customer_email_presence_validation'
+                ? (validation.valid ? 'Customer email validation passed' : `Customer email validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                : validation.step === 'status_presence_validation'
+                ? (validation.valid ? 'Status validation passed' : `Status validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                : validation.step === 'currency_code_presence_validation'
+                ? (validation.valid ? 'Currency code validation passed' : `Currency code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                : validation.step === 'collection_mode_presence_validation'
+                ? (validation.valid ? 'Collection mode validation passed' : `Collection mode validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                : validation.step === 'subscription_external_id_presence_validation'
+                ? (validation.valid ? 'Subscription external ID validation passed' : `Subscription external ID validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'date_format_validation'
                 ? (validation.valid ? 'Date format validation passed' : `Date format validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'date_validation'
                 ? (validation.valid ? 'Date validation passed' : `Date validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
-                : validation.step === 'card_token_validation'
-                ? (validation.valid ? 'Card token validation passed' : `Card token validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'ca_zip_code_validation'
                 ? (validation.valid ? 'Canadian zip code validation passed' : `Canadian zip code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'us_zip_code_validation'
@@ -668,6 +702,8 @@ const FileUpload = ({ onProcessingComplete }) => {
                 ? `Duplicate customer emails detected (${validation.count})`
                 : validation.step === 'duplicate_card_ids'
                 ? `Duplicate card IDs detected (${validation.count})`
+                : validation.step === 'status_paused_warning'
+                ? `Paused subscription status (${validation.count})`
                 : validation.step === 'no_token_found'
                 ? (validation.valid ? 'No token found validation passed' : `No token found (${validation.count})`)
                 : validation.step === 'successfully_mapped_records'
@@ -689,7 +725,7 @@ const FileUpload = ({ onProcessingComplete }) => {
                   link.click();
                   document.body.removeChild(link);
                 }}
-                title={isWarning ? "Download duplicate records report" : validation.valid && validation.step === 'successfully_mapped_records' ? "Download final import file" : "Download incorrect records report"}
+                title={isWarning ? (validation.step === 'status_paused_warning' ? 'Download paused status report' : 'Download duplicate records report') : validation.valid && validation.step === 'successfully_mapped_records' ? "Download final import file" : "Download incorrect records report"}
               >
                 📥
               </button>
@@ -702,9 +738,14 @@ const FileUpload = ({ onProcessingComplete }) => {
            !(validation.step === 'column_validation' && validation.valid) && 
            !(validation.step === 'address_country_code_validation' && validation.valid) &&
            !(validation.step === 'price_id_validation' && validation.valid) &&
+           !(validation.step === 'card_token_presence_validation' && validation.valid) &&
+           !(validation.step === 'customer_email_presence_validation' && validation.valid) &&
+           !(validation.step === 'status_presence_validation' && validation.valid) &&
+           !(validation.step === 'currency_code_presence_validation' && validation.valid) &&
+           !(validation.step === 'collection_mode_presence_validation' && validation.valid) &&
+           !(validation.step === 'subscription_external_id_presence_validation' && validation.valid) &&
            !(validation.step === 'date_format_validation' && validation.valid) &&
            !(validation.step === 'date_validation' && validation.valid) &&
-           !(validation.step === 'card_token_validation' && validation.valid) &&
            !(validation.step === 'ca_zip_code_validation' && validation.valid) &&
            !(validation.step === 'unsupported_countries_validation' && validation.valid) &&
            !(validation.step === 'us_zip_code_validation' && validation.valid && (!validation.autocorrected_count || validation.autocorrected_count === 0)) &&
@@ -715,7 +756,11 @@ const FileUpload = ({ onProcessingComplete }) => {
                 <p>{validation.message}</p>
                 {validation.download_file && (
                   <div className="missing-columns">
-                    <p>Click the download icon to get a report of all duplicate records.</p>
+                    <p>
+                      {validation.step === 'status_paused_warning'
+                        ? 'Click the download icon to get a report of all paused records.'
+                        : 'Click the download icon to get a report of all duplicate records.'}
+                    </p>
                   </div>
                 )}
               </>
@@ -758,7 +803,7 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <>
-                    <p>Every row must have a value in <code>price_id_1</code> starting with <code>pri_</code>. Quantities must be non-negative whole numbers: values like <code>2.0</code> from spreadsheets are normalized to <code>2</code> before checking. After normalization, each <code>quantity_N</code> must be digits only (no minus sign, no decimal point). For each line index <code>N</code>: if <code>price_id_N</code> is filled, <code>quantity_N</code> must be present and pass this rule (e.g. <code>-1</code> and <code>2.5</code> are invalid). Optional <code>price_id_N</code> values must still start with <code>pri_</code> when non-empty.</p>
+                    <p>Every row needs a price ID (<code>price_id_1</code>) starting with <code>pri_</code>. For each line, if <code>price_id_N</code> is filled, the matching <code>quantity_N</code> must be a non-negative integer (whole number).</p>
                     {validation.error && (
                       <div className="missing-columns">
                         <p><strong>Error:</strong> {validation.error}</p>
@@ -769,6 +814,61 @@ const FileUpload = ({ onProcessingComplete }) => {
                       <p>Click the download icon to get a report of all incorrect records.</p>
                     </div>
                   </>
+                )}
+              </>
+            ) : validation.step === 'card_token_presence_validation' ? (
+              <>
+                {!validation.valid && (
+                  <div className="missing-columns">
+                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} subscription rows with no card token value.</strong></p>
+                    <p>Click the download icon to get a report of all incorrect records.</p>
+                  </div>
+                )}
+              </>
+            ) : validation.step === 'customer_email_presence_validation' ? (
+              <>
+                {!validation.valid && (
+                  <div className="missing-columns">
+                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing customer email.</strong></p>
+                    <p>Click the download icon to get a report of all incorrect records.</p>
+                  </div>
+                )}
+              </>
+            ) : validation.step === 'status_presence_validation' ? (
+              <>
+                {!validation.valid && (
+                  <div className="missing-columns">
+                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with invalid or missing status.</strong></p>
+                    <p>Allowed values are <code>active</code>, <code>trialing</code>, and <code>paused</code> (case-insensitive).</p>
+                    <p>Click the download icon to get a report of all incorrect records.</p>
+                  </div>
+                )}
+              </>
+            ) : validation.step === 'currency_code_presence_validation' ? (
+              <>
+                {!validation.valid && (
+                  <div className="missing-columns">
+                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing currency code.</strong></p>
+                    <p>Click the download icon to get a report of all incorrect records.</p>
+                  </div>
+                )}
+              </>
+            ) : validation.step === 'collection_mode_presence_validation' ? (
+              <>
+                {!validation.valid && (
+                  <div className="missing-columns">
+                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing collection mode.</strong></p>
+                    <p>Click the download icon to get a report of all incorrect records.</p>
+                  </div>
+                )}
+              </>
+            ) : validation.step === 'subscription_external_id_presence_validation' ? (
+              <>
+                {!validation.valid && (
+                  <div className="missing-columns">
+                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing subscription external ID.</strong></p>
+                    <p>Click the download icon to get a report of all incorrect records.</p>
+                  </div>
                 )}
               </>
             ) : validation.step === 'date_format_validation' ? (
@@ -790,18 +890,6 @@ const FileUpload = ({ onProcessingComplete }) => {
                     <p>Date periods must be logical: current_period_started_at dates should not be in the future, current_period_ends_at dates should not be in the past.</p>
                     <div className="missing-columns">
                       <p><strong>Found {validation.incorrect_count} records with invalid date periods.</strong></p>
-                      <p>Click the download icon to get a report of all incorrect records.</p>
-                    </div>
-                  </>
-                )}
-              </>
-            ) : validation.step === 'card_token_validation' ? (
-              <>
-                {!validation.valid && (
-                  <>
-                    <p>Bluesnap card tokens must be exactly 13 numerical characters.</p>
-                    <div className="missing-columns">
-                      <p><strong>Found {validation.incorrect_count} card tokens with incorrect format.</strong></p>
                       <p>Click the download icon to get a report of all incorrect records.</p>
                     </div>
                   </>
