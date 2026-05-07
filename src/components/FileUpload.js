@@ -529,11 +529,11 @@ const FileUpload = ({ onProcessingComplete }) => {
                 onChange={(e) => setStripIsoDateFractionalSuffix(e.target.checked)}
                 className="checkbox-input"
               />
-              <span>Normalize ISO date timestamps (fractional seconds)</span>
+              <span>Normalise and remove fractional seconds from dates (common Stripe format)</span>
               <div className="info-icon-wrapper">
                 <span className="info-icon">ℹ️</span>
                 <div className="tooltip">
-                  For started_at, paused_at, current_period_started_at, and current_period_ends_at: if a value looks like 2026-04-09T10:10:08.000Z or 2026-04-09T10:10:08.123Z (any digits after the dot before Z), remove the fractional part so it becomes 2026-04-09T10:10:08Z. Values without fractional seconds are unchanged.
+                  When enabled, normalises ISO timestamps on started_at, paused_at, current_period_started_at, and current_period_ends_at by stripping fractional seconds (anything like .000 or .123 before the Z). Example: 2026-04-09T10:10:08.123Z becomes 2026-04-09T10:10:08Z. Values that already have no fractional part are left unchanged.
                 </div>
               </div>
             </label>

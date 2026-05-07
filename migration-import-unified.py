@@ -26,6 +26,70 @@ def clean_dataframe_for_csv(df):
         df_cleaned[col] = df_cleaned[col].str.replace(r'\.0$', '', regex=True)
     return df_cleaned
 
+# Set per process_migration run: mapping-origin column names as they appear in `completed` (after renames).
+_validation_report_exclude_columns = frozenset()
+
+
+def compute_columns_originating_from_mapping_only(
+    mapping_columns,
+    subscriber_columns,
+    merge_keys,
+    merged_column_names,
+):
+    """
+    Names of merged columns that come only from the left (mapping) dataframe, plus
+    left halves of duplicate non-key columns (pandas suffix _x).
+
+    merge_keys: columns used for the merge (appear once in the merged frame, not duplicated).
+    """
+    mk = set(merge_keys)
+    mc = set(mapping_columns)
+    sc = set(subscriber_columns)
+    merged = set(merged_column_names)
+    names = set()
+    for c in mc - sc - mk:
+        if c in merged:
+            names.add(c)
+    for c in (mc & sc) - mk:
+        suffixed = f'{c}_x'
+        if suffixed in merged:
+            names.add(suffixed)
+    return names
+
+
+def map_column_names_through_rename(names, rename_dict):
+    """Apply the same renames used on the merged dataframe (Stripe completed step)."""
+    out = set()
+    for c in names:
+        out.add(rename_dict.get(c, c))
+    return out
+
+
+def strip_mapping_metadata_from_validation_report_df(df):
+    """
+    Remove columns that originated from the mapping file merge so validation error CSVs
+    only show subscriber-side fields (merge keys and subscriber-only columns remain).
+
+    Uses _validation_report_exclude_columns populated after merge; empty before merge (subscriber-only phases).
+    Always drops pandas merge indicator `_merge` if present.
+    """
+    if df is None or getattr(df, 'empty', True):
+        return df
+    exclude = set(_validation_report_exclude_columns) | {'_merge'}
+    drop = []
+    for col in df.columns:
+        if col in exclude or str(col) in exclude:
+            drop.append(col)
+    if not drop:
+        return df
+    return df.drop(columns=drop, errors='ignore')
+
+
+def clean_dataframe_for_validation_report_csv(df):
+    """Use for validation / warning download CSVs; omits mapping-only columns, then string-cleans."""
+    df = strip_mapping_metadata_from_validation_report_df(df)
+    return clean_dataframe_for_csv(df)
+
 def generate_random_email():
     """Generate a random email for sandbox data anonymization"""
     random_string = ''.join(random.choices(string.ascii_lowercase + string.digits, k=5))
@@ -265,7 +329,7 @@ def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=F
         
         # Convert all columns to strings to prevent float conversion in CSV
         if not incorrect_records.empty:
-            incorrect_records = clean_dataframe_for_csv(incorrect_records)
+            incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
         
         incorrect_count = len(incorrect_records)
         total_records = len(validation_data)
@@ -341,7 +405,7 @@ def validate_address_country_code_format(subscriber_data, seller_name='', is_san
         incorrect_records = validation_data[~valid_mask].copy()
 
         if not incorrect_records.empty:
-            incorrect_records = clean_dataframe_for_csv(incorrect_records)
+            incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
 
         return {
             'valid': len(incorrect_records) == 0,
@@ -495,7 +559,7 @@ def validate_price_id_prefix(subscriber_data, seller_name='', is_sandbox=False):
 
         incorrect_records = validation_data[invalid_mask].copy()
         if not incorrect_records.empty:
-            incorrect_records = clean_dataframe_for_csv(incorrect_records)
+            incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
 
         return {
             'valid': len(incorrect_records) == 0,
@@ -590,7 +654,7 @@ def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
 
         # Convert all columns to strings to prevent float conversion in CSV
         if not incorrect_records.empty:
-            incorrect_records = clean_dataframe_for_csv(incorrect_records)
+            incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
         
         return {
             'valid': len(incorrect_records) == 0,
@@ -704,7 +768,10 @@ def validate_date_periods(subscriber_data, seller_name='', is_sandbox=False):
         for col in incorrect_records.columns:
             if incorrect_records[col].dtype == 'datetime64[ns]' or incorrect_records[col].dtype == 'datetime64[ns, UTC]':
                 incorrect_records[col] = incorrect_records[col].astype(str)
-        
+
+        if not incorrect_records.empty:
+            incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
+
         return {
             'valid': len(incorrect_records) == 0,
             'incorrect_count': len(incorrect_records),
@@ -791,7 +858,7 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
         # Wrap this in try/except to preserve missing_count even if conversion fails
         try:
             if not missing_zip_codes.empty:
-                missing_zip_codes = clean_dataframe_for_csv(missing_zip_codes)
+                missing_zip_codes = clean_dataframe_for_validation_report_csv(missing_zip_codes)
         except Exception as e:
             print(f"Warning: Error converting columns to strings: {e}")
             # Continue with unconverted data - missing_count is still valid
@@ -891,7 +958,7 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
         
         # Convert all columns to strings to prevent float conversion in CSV
         if not invalid_zip_codes.empty:
-            invalid_zip_codes = clean_dataframe_for_csv(invalid_zip_codes)
+            invalid_zip_codes = clean_dataframe_for_validation_report_csv(invalid_zip_codes)
         
         return {
             'valid': len(invalid_zip_codes) == 0,
@@ -994,7 +1061,7 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
         
         # Convert all columns to strings to prevent float conversion in CSV
         if not invalid_zip_codes.empty:
-            invalid_zip_codes = clean_dataframe_for_csv(invalid_zip_codes)
+            invalid_zip_codes = clean_dataframe_for_validation_report_csv(invalid_zip_codes)
         
         return {
             'valid': len(invalid_zip_codes) == 0,
@@ -1032,6 +1099,9 @@ def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=
     Returns:
         dict: Processing results and file information
     """
+    global _validation_report_exclude_columns
+    _validation_report_exclude_columns = frozenset()
+
     # Only anonymise when in sandbox and the option is enabled
     anonymise_emails = is_sandbox and anonymise_email
     start_time = time.time()
@@ -1637,8 +1707,15 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         
         # Drop the 'original_credit_card_number' column, as we no longer need it in the final output
         finaljoin = finaljoin.drop(columns=['original_credit_card_number'])
-        
+
+        drops_raw = compute_columns_originating_from_mapping_only(
+            set(filtered_mappingdata.columns),
+            set(subscribedata.columns),
+            ('card_token',),
+            set(finaljoin.columns),
+        )
         completed = finaljoin
+        _validation_report_exclude_columns = frozenset(drops_raw & set(completed.columns))
     
     else:
         # Stripe processing (using the working logic from original files)
@@ -1655,6 +1732,20 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                             left_on='card_id', 
                             right_on='card_id', 
                             how='outer')
+
+        drops_raw = compute_columns_originating_from_mapping_only(
+            set(mappingdata.columns),
+            set(subscribedata.columns),
+            ('card_id',),
+            set(finaljoin.columns),
+        )
+        stripe_mapping_columns_rename = {
+            'card.number': 'card_token',
+            'card.name': 'card_holder_name',
+            'card.exp_month': 'card_expiry_month',
+            'card.exp_year': 'card_expiry_year',
+        }
+        drops_after_rename = map_column_names_through_rename(drops_raw, stripe_mapping_columns_rename)
         
         # Filter null card_ids after merge (like original)
         finaljoin = finaljoin[finaljoin['card_id'].notna()]
@@ -1665,12 +1756,10 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         finaljoin['is_duplicate_token'] = duplicate_token_mask
         
         # Rename columns as required (like original)
-        completed = finaljoin.rename(columns={
-            'card.number': 'card_token',
-            'card.name': 'card_holder_name',
-            'card.exp_month': 'card_expiry_month',
-            'card.exp_year': 'card_expiry_year',
-        })
+        completed = finaljoin.rename(columns=stripe_mapping_columns_rename)
+        _validation_report_exclude_columns = frozenset(
+            drops_after_rename & set(completed.columns)
+        )
         
         completed['card_holder_name'] = completed['card_holder_name'].fillna(completed['customer_full_name'])
     
