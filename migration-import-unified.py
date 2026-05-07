@@ -29,6 +29,10 @@ def clean_dataframe_for_csv(df):
 # Set per process_migration run: mapping-origin column names as they appear in `completed` (after renames).
 _validation_report_exclude_columns = frozenset()
 
+# Subscriber column names from the subscription CSV only (_temp_row_id is internal and excluded). Used to filter error-report CSVs.
+_subscriber_report_columns = frozenset()
+_subscriber_report_column_order = []
+
 
 def compute_columns_originating_from_mapping_only(
     mapping_columns,
@@ -85,9 +89,97 @@ def strip_mapping_metadata_from_validation_report_df(df):
     return df.drop(columns=drop, errors='ignore')
 
 
+def restrict_validation_report_to_subscriber_columns(df):
+    """
+    Keep only columns that existed on the subscription CSV (plus card_token as the join field).
+    Drops Stripe template padding (description, name, card.address_*, …), vault_provider, and other
+    columns introduced after merge.
+    """
+    if df is None or getattr(df, 'empty', True):
+        return df
+    if not _subscriber_report_columns:
+        return df
+    allowed = set(_subscriber_report_columns) | {'card_token'}
+    keep = [c for c in df.columns if c in allowed]
+    if len(keep) == len(df.columns):
+        return df
+    if not keep:
+        return df
+    order = [c for c in _subscriber_report_column_order if c in keep]
+    seen = set(order)
+    rest = [c for c in keep if c not in seen]
+    return df[order + rest].copy()
+
+
+def normalize_validation_report_columns(df):
+    """
+    After mapping-only columns are stripped, align names with the subscriber export:
+
+    - Stripe merge uses `card_id` internally; subscriber CSV calls the join field `card_token`.
+      After strip, mapping's `card.number` (renamed to `card_token`) is removed — rename `card_id`
+      to `card_token` when no `card_token` column remains.
+    - Merge duplicates from overlapping column names use `_y` / `_x` suffixes; keep subscriber
+      side (`_y`) under the original header and drop stray `_x` columns.
+    - Drop internal tracking columns not present in the subscriber template.
+    """
+    if df is None or getattr(df, 'empty', True):
+        return df
+    out = df.copy()
+    # Subscriber-side duplicate merge columns: foo_y -> foo when foo is not already present
+    renames_y = {}
+    for col in list(out.columns):
+        if isinstance(col, str) and col.endswith('_y'):
+            base = col[:-2]
+            if base and base not in out.columns:
+                renames_y[col] = base
+    if renames_y:
+        out = out.rename(columns=renames_y)
+    drop_x = [c for c in out.columns if isinstance(c, str) and c.endswith('_x')]
+    if drop_x:
+        out = out.drop(columns=drop_x, errors='ignore')
+    # Stripe: join key stored as card_id after rename from subscriber card_token
+    if 'card_id' in out.columns and 'card_token' not in out.columns:
+        out = out.rename(columns={'card_id': 'card_token'})
+    if 'is_duplicate_token' in out.columns:
+        out = out.drop(columns=['is_duplicate_token'], errors='ignore')
+    return out
+
+
+def extract_failed_temp_row_ids_from_df(df):
+    """Collect numeric _temp_row_id values before export cleaning drops that column."""
+    if df is None or getattr(df, 'empty', True) or '_temp_row_id' not in df.columns:
+        return []
+    temp_ids = df['_temp_row_id'].replace('', pd.NA).dropna()
+    failed_ids = []
+    for x in temp_ids:
+        try:
+            if str(x).strip() == '':
+                continue
+            failed_ids.append(int(float(x)))
+        except (TypeError, ValueError):
+            continue
+    return failed_ids
+
+
+def merge_failed_temp_row_ids_into_set(failed_row_ids_set, validation_dict):
+    """Prefer failed_temp_row_ids from validators; else parse incorrect_records if _temp_row_id still present."""
+    if not validation_dict:
+        return
+    ft = validation_dict.get('failed_temp_row_ids')
+    if ft is not None:
+        failed_row_ids_set.update(ft)
+        return
+    rec = validation_dict.get('incorrect_records')
+    if rec is not None and '_temp_row_id' in rec.columns:
+        failed_row_ids_set.update(extract_failed_temp_row_ids_from_df(rec))
+
+
 def clean_dataframe_for_validation_report_csv(df):
     """Use for validation / warning download CSVs; omits mapping-only columns, then string-cleans."""
     df = strip_mapping_metadata_from_validation_report_df(df)
+    df = normalize_validation_report_columns(df)
+    df = restrict_validation_report_to_subscriber_columns(df)
+    df = df.drop(columns=['_temp_row_id'], errors='ignore')
     return clean_dataframe_for_csv(df)
 
 def generate_random_email():
@@ -326,6 +418,7 @@ def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=F
         # Find records with unsupported country codes
         unsupported_mask = validation_data['address_country_code'].isin(unsupported_countries)
         incorrect_records = validation_data[unsupported_mask].copy()
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
         
         # Convert all columns to strings to prevent float conversion in CSV
         if not incorrect_records.empty:
@@ -340,6 +433,7 @@ def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=F
                 'incorrect_count': incorrect_count,
                 'total_records': total_records,
                 'incorrect_records': incorrect_records,
+                'failed_temp_row_ids': failed_temp_row_ids,
                 'unsupported_countries': unsupported_countries,
                 'unsupported_countries_dict': unsupported_countries_dict
             }
@@ -403,6 +497,7 @@ def validate_address_country_code_format(subscriber_data, seller_name='', is_san
         col = validation_data['address_country_code']
         valid_mask = col.apply(is_valid_alpha2)
         incorrect_records = validation_data[~valid_mask].copy()
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
 
         if not incorrect_records.empty:
             incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
@@ -411,6 +506,7 @@ def validate_address_country_code_format(subscriber_data, seller_name='', is_san
             'valid': len(incorrect_records) == 0,
             'incorrect_count': len(incorrect_records),
             'incorrect_records': incorrect_records,
+            'failed_temp_row_ids': failed_temp_row_ids,
             'total_records': len(validation_data)
         }
     except Exception as e:
@@ -558,6 +654,7 @@ def validate_price_id_prefix(subscriber_data, seller_name='', is_sandbox=False):
                 invalid_mask = invalid_mask | (price_nonempty & ~qty_ok)
 
         incorrect_records = validation_data[invalid_mask].copy()
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
         if not incorrect_records.empty:
             incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
 
@@ -565,6 +662,7 @@ def validate_price_id_prefix(subscriber_data, seller_name='', is_sandbox=False):
             'valid': len(incorrect_records) == 0,
             'incorrect_count': len(incorrect_records),
             'incorrect_records': incorrect_records,
+            'failed_temp_row_ids': failed_temp_row_ids,
             'total_records': len(validation_data)
         }
     except Exception as e:
@@ -651,6 +749,7 @@ def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
                 incorrect_format_mask = incorrect_format_mask | ~col_valid
 
         incorrect_records = validation_data[incorrect_format_mask].copy()
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
 
         # Convert all columns to strings to prevent float conversion in CSV
         if not incorrect_records.empty:
@@ -660,6 +759,7 @@ def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
             'valid': len(incorrect_records) == 0,
             'incorrect_count': len(incorrect_records),
             'incorrect_records': incorrect_records,
+            'failed_temp_row_ids': failed_temp_row_ids,
             'total_records': len(validation_data)
         }
         
@@ -769,6 +869,7 @@ def validate_date_periods(subscriber_data, seller_name='', is_sandbox=False):
             if incorrect_records[col].dtype == 'datetime64[ns]' or incorrect_records[col].dtype == 'datetime64[ns, UTC]':
                 incorrect_records[col] = incorrect_records[col].astype(str)
 
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
         if not incorrect_records.empty:
             incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
 
@@ -776,6 +877,7 @@ def validate_date_periods(subscriber_data, seller_name='', is_sandbox=False):
             'valid': len(incorrect_records) == 0,
             'incorrect_count': len(incorrect_records),
             'incorrect_records': incorrect_records,
+            'failed_temp_row_ids': failed_temp_row_ids,
             'total_records': len(valid_data)
         }
         
@@ -854,6 +956,7 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
                 print(f"Warning: Error counting available zip codes from mapping: {e}")
                 available_count = 0
         
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(missing_zip_codes)
         # Convert all columns to strings to prevent float conversion in CSV
         # Wrap this in try/except to preserve missing_count even if conversion fails
         try:
@@ -869,6 +972,7 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
             'total_records': total_records_count,
             'available_from_mapping': available_count,
             'missing_records': missing_zip_codes,
+            'failed_temp_row_ids': failed_temp_row_ids,
             'required_countries': required_countries,
             'required_countries_dict': required_countries_dict
         }
@@ -956,6 +1060,7 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
             ~normalized_zip.str.match(_CA_ZIP_PATTERN, case=False)
         ].copy()
         
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(invalid_zip_codes)
         # Convert all columns to strings to prevent float conversion in CSV
         if not invalid_zip_codes.empty:
             invalid_zip_codes = clean_dataframe_for_validation_report_csv(invalid_zip_codes)
@@ -964,6 +1069,7 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
             'valid': len(invalid_zip_codes) == 0,
             'incorrect_count': len(invalid_zip_codes),
             'incorrect_records': invalid_zip_codes,
+            'failed_temp_row_ids': failed_temp_row_ids,
             'total_records': len(ca_records_with_zip)
         }
         
@@ -1059,6 +1165,7 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
         # Drop the temporary normalized column before returning
         invalid_zip_codes = invalid_zip_codes.drop(columns=['_normalized_zip'], errors='ignore')
         
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(invalid_zip_codes)
         # Convert all columns to strings to prevent float conversion in CSV
         if not invalid_zip_codes.empty:
             invalid_zip_codes = clean_dataframe_for_validation_report_csv(invalid_zip_codes)
@@ -1067,6 +1174,7 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
             'valid': len(invalid_zip_codes) == 0,
             'incorrect_count': len(invalid_zip_codes),
             'incorrect_records': invalid_zip_codes,
+            'failed_temp_row_ids': failed_temp_row_ids,
             'total_records': len(us_records_with_zip),
             'autocorrectable_count': autocorrectable_count
         }
@@ -1099,8 +1207,10 @@ def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=
     Returns:
         dict: Processing results and file information
     """
-    global _validation_report_exclude_columns
+    global _validation_report_exclude_columns, _subscriber_report_columns, _subscriber_report_column_order
     _validation_report_exclude_columns = frozenset()
+    _subscriber_report_columns = frozenset()
+    _subscriber_report_column_order = []
 
     # Only anonymise when in sandbox and the option is enabled
     anonymise_emails = is_sandbox and anonymise_email
@@ -1147,6 +1257,12 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     # Add temporary unique row ID to track records through merge and validations
     subscribedata['_temp_row_id'] = range(len(subscribedata))
+    _subscriber_report_columns = frozenset(
+        c for c in subscribedata.columns if c != '_temp_row_id'
+    )
+    _subscriber_report_column_order = [
+        c for c in subscribedata.columns if c != '_temp_row_id'
+    ]
     
     if hasattr(mapping_file, 'read'):
         # File object from React
@@ -1243,18 +1359,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 except Exception as save_err:
                     print(f"Error saving incorrect records file: {save_err}")
 
-            if (
-                address_country_code_validation.get('incorrect_records') is not None
-                and '_temp_row_id' in address_country_code_validation['incorrect_records'].columns
-            ):
-                temp_ids = address_country_code_validation['incorrect_records'][
-                    '_temp_row_id'
-                ].replace('', pd.NA).dropna()
-                failed_ids = [
-                    int(float(x)) if str(x).strip() != '' else None for x in temp_ids
-                ]
-                failed_ids = [x for x in failed_ids if x is not None]
-                failed_row_ids.update(failed_ids)
+            merge_failed_temp_row_ids_into_set(failed_row_ids, address_country_code_validation)
 
             validation_results.append({
                 'valid': False,
@@ -1323,18 +1428,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 except Exception as save_err:
                     print(f"Error saving incorrect records file: {save_err}")
 
-            if (
-                price_id_validation.get('incorrect_records') is not None
-                and '_temp_row_id' in price_id_validation['incorrect_records'].columns
-            ):
-                temp_ids = price_id_validation['incorrect_records'][
-                    '_temp_row_id'
-                ].replace('', pd.NA).dropna()
-                failed_ids = [
-                    int(float(x)) if str(x).strip() != '' else None for x in temp_ids
-                ]
-                failed_ids = [x for x in failed_ids if x is not None]
-                failed_row_ids.update(failed_ids)
+            merge_failed_temp_row_ids_into_set(failed_row_ids, price_id_validation)
 
             validation_results.append({
                 'valid': False,
@@ -1404,13 +1498,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 except Exception as e:
                     print(f"Error saving incorrect records file: {e}")
             
-            # Collect failed _temp_row_id values from incorrect records
-            if unsupported_countries_validation['incorrect_records'] is not None and '_temp_row_id' in unsupported_countries_validation['incorrect_records'].columns:
-                # Convert back from string to int (since validation functions convert all columns to strings)
-                temp_ids = unsupported_countries_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                failed_ids = [x for x in failed_ids if x is not None]
-                failed_row_ids.update(failed_ids)
+            merge_failed_temp_row_ids_into_set(failed_row_ids, unsupported_countries_validation)
             
             # Add failed validation to results but continue processing
             validation_results.append({
@@ -1542,14 +1630,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 except Exception as e:
                     print(f"Error saving incorrect records file: {e}")
             
-            # Collect failed _temp_row_id values from incorrect records
-            if date_format_validation['incorrect_records'] is not None and '_temp_row_id' in date_format_validation['incorrect_records'].columns:
-                # Convert back from string to int (since validation functions convert all columns to strings)
-                temp_ids = date_format_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                # Convert to int, handling string values
-                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                failed_ids = [x for x in failed_ids if x is not None]
-                failed_row_ids.update(failed_ids)
+            merge_failed_temp_row_ids_into_set(failed_row_ids, date_format_validation)
             
             # Add failed validation to results but continue processing
             validation_results.append({
@@ -1607,13 +1688,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 except Exception as e:
                     print(f"Error saving incorrect records file: {e}")
             
-            # Collect failed _temp_row_id values from incorrect records
-            if date_validation['incorrect_records'] is not None and '_temp_row_id' in date_validation['incorrect_records'].columns:
-                # Convert back from string to int (since validation functions convert all columns to strings)
-                temp_ids = date_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                failed_ids = [x for x in failed_ids if x is not None]
-                failed_row_ids.update(failed_ids)
+            merge_failed_temp_row_ids_into_set(failed_row_ids, date_validation)
             
             # Add failed validation to results but continue processing
             validation_results.append({
@@ -1900,13 +1975,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                                 except Exception as e:
                                     print(f"Error saving missing records file: {e}")
                             
-                            # Collect failed _temp_row_id values from missing records (after mapping update)
-                            if missing_zip_validation['missing_records'] is not None and '_temp_row_id' in missing_zip_validation['missing_records'].columns:
-                                # Convert back from string to int (since validation functions convert all columns to strings)
-                                temp_ids = missing_zip_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                                failed_ids = [x for x in failed_ids if x is not None]
-                                failed_row_ids.update(failed_ids)
+                            merge_failed_temp_row_ids_into_set(failed_row_ids, missing_zip_validation)
                             
                             validation_results.append({
                                 'valid': False,
@@ -1943,14 +2012,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 except Exception as e:
                     print(f"Error saving missing records file: {e}")
             
-            # Collect failed _temp_row_id values from missing records
-            if missing_zip_validation['missing_records'] is not None and '_temp_row_id' in missing_zip_validation['missing_records'].columns:
-                # Convert back from string to int (since validation functions convert all columns to strings)
-                temp_ids = missing_zip_validation['missing_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                failed_ids = [x for x in failed_ids if x is not None]
-                failed_row_ids.update(failed_ids)
-                print(f"Collected {len(failed_ids)} failed row IDs from missing zip code validation: {failed_ids[:10]}")
+            before_missing_zip_merge = len(failed_row_ids)
+            merge_failed_temp_row_ids_into_set(failed_row_ids, missing_zip_validation)
+            added_missing = len(failed_row_ids) - before_missing_zip_merge
+            if added_missing:
+                print(f"Collected {added_missing} failed row IDs from missing zip code validation")
             
             # Add failed validation to results but continue processing
             validation_results.append({
@@ -2213,13 +2279,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 except Exception as e:
                     print(f"Error saving incorrect records file: {e}")
                 
-                # Collect failed _temp_row_id values from incorrect records
-                if ca_zip_validation['incorrect_records'] is not None and '_temp_row_id' in ca_zip_validation['incorrect_records'].columns:
-                    # Convert back from string to int (since validation functions convert all columns to strings)
-                    temp_ids = ca_zip_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                    failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                    failed_ids = [x for x in failed_ids if x is not None]
-                    failed_row_ids.update(failed_ids)
+                merge_failed_temp_row_ids_into_set(failed_row_ids, ca_zip_validation)
             
             # Add failed validation to results but continue processing
             validation_results.append({
@@ -2329,13 +2389,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 # Still have invalid codes (either no autocorrect or autocorrect didn't fix everything)
                 if us_zip_validation:
                     print(f"US zip code validation failed. Found {us_zip_validation['incorrect_count']} incorrect formats.")
-                    # Collect failed _temp_row_id values from incorrect records
-                    if us_zip_validation['incorrect_records'] is not None and '_temp_row_id' in us_zip_validation['incorrect_records'].columns:
-                        # Convert back from string to int (since validation functions convert all columns to strings)
-                        temp_ids = us_zip_validation['incorrect_records']['_temp_row_id'].replace('', pd.NA).dropna()
-                        failed_ids = [int(float(x)) if str(x).strip() != '' else None for x in temp_ids]
-                        failed_ids = [x for x in failed_ids if x is not None]
-                        failed_row_ids.update(failed_ids)
+                    merge_failed_temp_row_ids_into_set(failed_row_ids, us_zip_validation)
                 
                 # Add failed validation to results but continue processing
                 validation_results.append({
@@ -2496,8 +2550,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             file_path = os.path.join(output_dir, filename)
             print(f"Saving file: {file_path}")
             
-            # Convert all columns to strings to prevent float conversion
-            df_string = clean_dataframe_for_csv(df)
+            # Final import keeps full merged columns for migration; other CSVs match subscriber headers + card_token
+            if filename.endswith('_final_import.csv'):
+                df_string = clean_dataframe_for_csv(df)
+            else:
+                df_string = clean_dataframe_for_validation_report_csv(df)
             
             # Save with string formatting
             df_string.to_csv(file_path, index=False)
