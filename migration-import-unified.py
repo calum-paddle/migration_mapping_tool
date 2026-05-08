@@ -8,6 +8,51 @@ import zipfile
 import re
 import unicodedata
 
+
+def _normalized_country_codes(series):
+    """
+    Normalize address_country_code for comparisons: strip, uppercase.
+    Empty / nan-like string tokens become NA so they do not match ISO lists.
+    """
+    if series is None:
+        return series
+    s = series.astype(str).str.strip().str.upper()
+    s = s.mask(s.isin(['', 'NAN', 'NONE', 'NAT']))
+    return s
+
+
+def _apply_us_zip_leading_zero_autocorrect(df):
+    """
+    In-place: for rows whose normalized country is US and postal normalizes to exactly 4 digits,
+    left-pad address_postal_code to 5 digits. Returns number of cells updated.
+    """
+    if df is None or getattr(df, 'empty', True):
+        return 0
+    if 'address_country_code' not in df.columns or 'address_postal_code' not in df.columns:
+        return 0
+    us_mask = _normalized_country_codes(df['address_country_code']) == 'US'
+    if not us_mask.any():
+        return 0
+
+    def normalize_zip_for_autocorrect(zip_val):
+        if pd.isna(zip_val):
+            return ''
+        if isinstance(zip_val, float) and zip_val.is_integer():
+            return str(int(zip_val))
+        return str(zip_val).strip()
+
+    us_records_subset = df.loc[us_mask, 'address_postal_code'].copy()
+    normalized_zips = us_records_subset.apply(normalize_zip_for_autocorrect)
+    four_digit_mask = normalized_zips.str.match(r'^\d{4}$')
+    autocorrected_count = int(four_digit_mask.sum())
+    if autocorrected_count > 0:
+        indices_to_correct = us_records_subset[four_digit_mask].index
+        df.loc[indices_to_correct, 'address_postal_code'] = (
+            normalized_zips.loc[indices_to_correct].str.zfill(5)
+        )
+    return autocorrected_count
+
+
 def clean_dataframe_for_csv(df):
     """
     Helper function to clean DataFrame columns for CSV export.
@@ -464,8 +509,10 @@ def validate_unsupported_countries(subscriber_data, seller_name='', is_sandbox=F
                 'incorrect_records': None
             }
         
-        # Find records with unsupported country codes
-        unsupported_mask = validation_data['address_country_code'].isin(unsupported_countries)
+        # Find records with unsupported country codes (case-insensitive ISO codes)
+        unsupported_mask = _normalized_country_codes(validation_data['address_country_code']).isin(
+            unsupported_countries
+        )
         incorrect_records = validation_data[unsupported_mask].copy()
         failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
         
@@ -828,6 +875,333 @@ def validate_merge_key_columns_present(subscribedata, mappingdata, provider):
         return {'valid': False, 'message': msg}
 
     return {'valid': True}
+
+
+def _clean_validation_results_for_response(validation_results):
+    """Match JSON-safe fields to the end-of-run failure payload (subset of each validation dict)."""
+    clean_validation_results = []
+    extra_keys = (
+        'missing_columns', 'total_columns', 'optional_columns', 'incorrect_count',
+        'total_records', 'download_file', 'error', 'missing_count', 'available_from_mapping',
+        'pulled_from_mapping_count', 'autocorrectable_count', 'autocorrected', 'autocorrected_count',
+        'type', 'count', 'message', 'required_countries', 'required_countries_dict',
+        'unsupported_countries', 'unsupported_countries_dict',
+    )
+    for validation in validation_results:
+        clean_validation = {
+            'valid': validation.get('valid', True),
+            'step': validation.get('step', 'unknown'),
+        }
+        for key in extra_keys:
+            if key in validation:
+                clean_validation[key] = validation[key]
+        clean_validation_results.append(clean_validation)
+    return clean_validation_results
+
+
+def _create_all_reports_zip_from_validation_downloads(
+    validation_results,
+    seller_name,
+    subscriber_filename,
+    provider,
+    is_sandbox,
+):
+    """
+    Build outputs/<base>_all_reports.zip from unique validation download_file CSV paths.
+    Uses the same base filename convention as the full migration export (seller + provider + sandbox).
+    Returns a single output_files-style dict with is_zip True, or None if nothing to zip.
+    """
+    validation_files_to_zip = []
+    for validation in validation_results:
+        fn = validation.get('download_file')
+        if fn:
+            validation_files_to_zip.append(fn)
+    seen = set()
+    unique_files = []
+    for fn in validation_files_to_zip:
+        if fn not in seen:
+            seen.add(fn)
+            unique_files.append(fn)
+    if not unique_files:
+        return None
+
+    output_dir = 'outputs'
+    os.makedirs(output_dir, exist_ok=True)
+
+    if seller_name:
+        clean_seller_name = "".join(c for c in seller_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        clean_seller_name = clean_seller_name.replace(' ', '_')
+        prov = (provider or 'stripe').strip().lower()
+        base_filename = f"{clean_seller_name}_{prov}"
+    else:
+        base = os.path.splitext(os.path.basename(str(subscriber_filename)))[0]
+        prov = (provider or 'stripe').strip().lower()
+        base_filename = f"{base}_{prov}"
+    if is_sandbox:
+        base_filename += "_sandbox"
+
+    zip_filename = f'{base_filename}_all_reports.zip'
+    zip_path = os.path.join(output_dir, zip_filename)
+
+    try:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for filename in unique_files:
+                file_path = os.path.join(output_dir, filename)
+                if os.path.exists(file_path):
+                    zipf.write(file_path, filename)
+                    print(f"Added {filename} to subscriber check-only zip file")
+        zip_size = os.path.getsize(zip_path)
+        print(f"Subscriber check-only zip created: {zip_path} (Size: {zip_size} bytes)")
+        return {
+            'name': zip_filename,
+            'size': zip_size,
+            'url': f'file://{os.path.abspath(zip_path)}',
+            'is_zip': True,
+        }
+    except Exception as e:
+        print(f"Error creating subscriber check-only zip file: {e}")
+        return None
+
+
+def _return_subscriber_csv_check_only_result(validation_results, start_time):
+    """After subscriber-only validations (through date_validation); no merge or mapping."""
+    failed_validations = [v for v in validation_results if not v.get('valid', True)]
+    clean_validation_results = _clean_validation_results_for_response(validation_results)
+    processing_time = time.time() - start_time
+    out = {
+        'subscriber_check_only': True,
+        'validation_results': clean_validation_results,
+        'processing_time': f'{processing_time:.2f} seconds',
+        'zip_file': None,
+        'output_files': [],
+    }
+    if failed_validations:
+        out['error'] = 'Validation failures detected'
+        out['failed_count'] = len(failed_validations)
+    return out
+
+
+def _run_zip_validations_subscriber_check_only(
+    subscribedata,
+    validation_results,
+    failed_row_ids,
+    seller_name,
+    is_sandbox,
+    provider,
+    autocorrect_us_zip,
+):
+    """
+    Missing postal + CA + US zip validations on subscriber export only (no token/mapping fill).
+    Mutates subscribedata when US leading-zero autocorrect runs.
+    """
+    print('Validating missing zip codes (subscriber check-only)...')
+    missing_zip_validation = None
+    try:
+        missing_zip_validation = validate_missing_zip_codes(subscribedata, provider, seller_name, is_sandbox)
+    except Exception as e:
+        print(f'Error during missing zip code validation: {e}')
+        validation_results.append({
+            'valid': False,
+            'step': 'missing_zip_code_validation',
+            'error': f'Validation error: {str(e)}',
+            'missing_count': 0,
+            'total_records': 0,
+            'available_from_mapping': 0,
+            'download_file': None,
+            'required_countries': ['AU', 'CA', 'FR', 'DE', 'IN', 'IT', 'NL', 'ES', 'GB', 'US'],
+            'required_countries_dict': {
+                'AU': '🇦🇺', 'CA': '🇨🇦', 'FR': '🇫🇷', 'DE': '🇩🇪', 'IN': '🇮🇳',
+                'IT': '🇮🇹', 'NL': '🇳🇱', 'ES': '🇪🇸', 'GB': '🇬🇧', 'US': '🇺🇸'
+            },
+        })
+
+    if missing_zip_validation:
+        if not missing_zip_validation['valid']:
+            download_file = None
+            if missing_zip_validation['missing_records'] is not None:
+                try:
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    clean_seller_name = "".join(
+                        c for c in seller_name if c.isalnum() or c in (' ', '-', '_')
+                    ).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = '_sandbox' if is_sandbox else '_production'
+                    missing_filename = (
+                        f'{clean_seller_name}_missing_postal_codes{env_suffix}_{int(time.time())}.csv'
+                    )
+                    missing_path = os.path.join(output_dir, missing_filename)
+                    missing_zip_validation['missing_records'].to_csv(missing_path, index=False)
+                    download_file = missing_filename
+                    print(f'Saved missing records to: {missing_path}')
+                except Exception as save_err:
+                    print(f'Error saving missing records file: {save_err}')
+            merge_failed_temp_row_ids_into_set(failed_row_ids, missing_zip_validation)
+            validation_results.append({
+                'valid': False,
+                'step': 'missing_zip_code_validation',
+                'missing_count': missing_zip_validation['missing_count'],
+                'total_records': missing_zip_validation['total_records'],
+                'available_from_mapping': missing_zip_validation['available_from_mapping'],
+                'pulled_from_mapping_count': 0,
+                'download_file': download_file,
+                'required_countries': missing_zip_validation.get('required_countries', []),
+                'required_countries_dict': missing_zip_validation.get('required_countries_dict', {}),
+            })
+        else:
+            validation_results.append({
+                'valid': True,
+                'step': 'missing_zip_code_validation',
+                'total_records': missing_zip_validation['total_records'],
+                'pulled_from_mapping_count': 0,
+                'required_countries': missing_zip_validation.get('required_countries', []),
+                'required_countries_dict': missing_zip_validation.get('required_countries_dict', {}),
+            })
+
+    print('Validating Canadian zip codes (subscriber check-only)...')
+    ca_zip_validation = None
+    try:
+        ca_zip_validation = validate_ca_zip_codes(subscribedata, seller_name, is_sandbox)
+    except Exception as e:
+        print(f'Error during CA zip code validation: {e}')
+        validation_results.append({
+            'valid': False,
+            'step': 'ca_zip_code_validation',
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'download_file': None,
+        })
+
+    if ca_zip_validation:
+        if not ca_zip_validation['valid']:
+            print(
+                f"CA zip code validation failed. Found {ca_zip_validation['incorrect_count']} incorrect formats."
+            )
+            download_file = None
+            if ca_zip_validation['incorrect_records'] is not None:
+                try:
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    clean_seller_name = "".join(
+                        c for c in seller_name if c.isalnum() or c in (' ', '-', '_')
+                    ).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = '_sandbox' if is_sandbox else '_production'
+                    incorrect_filename = (
+                        f'{clean_seller_name}_invalid_ca_zip_codes{env_suffix}_{int(time.time())}.csv'
+                    )
+                    incorrect_path = os.path.join(output_dir, incorrect_filename)
+                    ca_zip_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                    download_file = incorrect_filename
+                    print(f'Saved incorrect records to: {incorrect_path}')
+                except Exception as save_err:
+                    print(f'Error saving incorrect records file: {save_err}')
+                merge_failed_temp_row_ids_into_set(failed_row_ids, ca_zip_validation)
+            validation_results.append({
+                'valid': False,
+                'step': 'ca_zip_code_validation',
+                'incorrect_count': ca_zip_validation['incorrect_count'],
+                'total_records': ca_zip_validation['total_records'],
+                'download_file': download_file,
+            })
+        else:
+            print(
+                f"CA zip code validation passed. All {ca_zip_validation['total_records']} Canadian zip codes are correctly formatted."
+            )
+            validation_results.append({
+                'valid': True,
+                'step': 'ca_zip_code_validation',
+                'total_records': ca_zip_validation['total_records'],
+            })
+
+    print('Validating US zip codes (subscriber check-only)...')
+    us_zip_validation = None
+    try:
+        us_zip_validation = validate_us_zip_codes(subscribedata, seller_name, is_sandbox)
+    except Exception as e:
+        print(f'Error during US zip code validation: {e}')
+        validation_results.append({
+            'valid': False,
+            'step': 'us_zip_code_validation',
+            'error': f'Validation error: {str(e)}',
+            'incorrect_count': 0,
+            'total_records': 0,
+            'download_file': None,
+            'autocorrectable_count': 0,
+        })
+
+    if us_zip_validation:
+        if not us_zip_validation['valid']:
+            print(
+                f"US zip code validation failed. Found {us_zip_validation['incorrect_count']} incorrect formats."
+            )
+            print(
+                f"Of these, {us_zip_validation['autocorrectable_count']} can be autocorrected with leading zeros."
+            )
+            autocorrected_count = 0
+            if autocorrect_us_zip and us_zip_validation['autocorrectable_count'] > 0:
+                print('Autocorrecting 4-digit US zip codes with leading zeros...')
+                autocorrected_count = _apply_us_zip_leading_zero_autocorrect(subscribedata)
+                print(f'Autocorrected {autocorrected_count} US zip codes.')
+                us_zip_validation = validate_us_zip_codes(subscribedata, seller_name, is_sandbox)
+
+            download_file = None
+            if us_zip_validation and not us_zip_validation['valid'] and us_zip_validation['incorrect_records'] is not None:
+                try:
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    clean_seller_name = "".join(
+                        c for c in seller_name if c.isalnum() or c in (' ', '-', '_')
+                    ).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = '_sandbox' if is_sandbox else '_production'
+                    filename_suffix = '_after_autocorrect' if autocorrected_count > 0 else ''
+                    incorrect_filename = (
+                        f'{clean_seller_name}_invalid_us_zip_codes{filename_suffix}{env_suffix}_{int(time.time())}.csv'
+                    )
+                    incorrect_path = os.path.join(output_dir, incorrect_filename)
+                    us_zip_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                    download_file = incorrect_filename
+                    print(f'Saved incorrect records to: {incorrect_path}')
+                except Exception as save_err:
+                    print(f'Error saving incorrect records file: {save_err}')
+
+            if us_zip_validation and us_zip_validation['valid']:
+                print('US zip code validation passed after autocorrection.')
+                validation_results.append({
+                    'valid': True,
+                    'step': 'us_zip_code_validation',
+                    'total_records': us_zip_validation.get('total_records', 0),
+                    'autocorrected_count': int(autocorrected_count),
+                })
+            else:
+                if us_zip_validation:
+                    print(
+                        f"US zip code validation failed. Found {us_zip_validation['incorrect_count']} incorrect formats."
+                    )
+                    merge_failed_temp_row_ids_into_set(failed_row_ids, us_zip_validation)
+                validation_results.append({
+                    'valid': False,
+                    'step': 'us_zip_code_validation',
+                    'incorrect_count': us_zip_validation.get('incorrect_count', 0) if us_zip_validation else 0,
+                    'total_records': us_zip_validation.get('total_records', 0) if us_zip_validation else 0,
+                    'download_file': download_file,
+                    'autocorrectable_count': (
+                        us_zip_validation.get('autocorrectable_count', 0) if us_zip_validation else 0
+                    ),
+                    'autocorrected_count': int(autocorrected_count),
+                })
+        else:
+            print(
+                f"US zip code validation passed. All {us_zip_validation['total_records']} US zip codes are correctly formatted."
+            )
+            validation_results.append({
+                'valid': True,
+                'step': 'us_zip_code_validation',
+                'autocorrected_count': 0,
+                'total_records': us_zip_validation['total_records'],
+            })
 
 
 def _validate_subscriber_column_presence(subscriber_data, column_name):
@@ -1202,8 +1576,9 @@ def validate_missing_zip_codes(data, provider, seller_name='', is_sandbox=False)
         # List of required country codes (for validation logic)
         required_countries = list(required_countries_dict.keys())
         
-        # Filter for records from required countries
-        required_records = data[data['address_country_code'].isin(required_countries)].copy()
+        # Filter for records from required countries (case-insensitive ISO codes)
+        cc_norm = _normalized_country_codes(data['address_country_code'])
+        required_records = data[cc_norm.isin(required_countries)].copy()
         
         if len(required_records) == 0:
             return {
@@ -1326,7 +1701,7 @@ def validate_ca_zip_codes(data, seller_name='', is_sandbox=False):
     """
     try:
         # Filter for Canadian records (case-insensitive country code)
-        ca_mask = data['address_country_code'].astype(str).str.strip().str.upper() == 'CA'
+        ca_mask = _normalized_country_codes(data['address_country_code']) == 'CA'
         ca_records = data[ca_mask].copy()
         
         if len(ca_records) == 0:
@@ -1394,8 +1769,8 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
         dict: Validation results with status and incorrect records
     """
     try:
-        # Filter for US records
-        us_records = data[data['address_country_code'] == 'US'].copy()
+        # Filter for US records (case-insensitive country code)
+        us_records = data[_normalized_country_codes(data['address_country_code']) == 'US'].copy()
         
         if len(us_records) == 0:
             return {
@@ -1488,19 +1863,20 @@ def validate_us_zip_codes(data, seller_name='', is_sandbox=False):
             'autocorrectable_count': 0
         }
 
-def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', autocorrect_us_zip=False, use_mapping_zip_codes=False, anonymise_email=False, strip_iso_date_fractional_suffix=False):
+def process_migration(subscriber_file, mapping_file, vault_provider, is_sandbox=False, provider='stripe', seller_name='', autocorrect_us_zip=False, use_mapping_zip_codes=False, anonymise_email=False, strip_iso_date_fractional_suffix=False, subscriber_csv_check_only=False):
     """
     Process migration from payment providers to Paddle Billing
     
     Args:
         subscriber_file: File object or path to subscriber CSV
-        mapping_file: File object or path to mapping CSV
+        mapping_file: File object or path to mapping CSV (ignored when subscriber_csv_check_only is True)
         vault_provider: Name of the vault provider
         is_sandbox: Boolean indicating if this is sandbox mode
         provider: String indicating the payment provider ('stripe' or 'bluesnap')
         seller_name: Name of the seller for file naming
         anonymise_email: Boolean; when True and is_sandbox, customer emails are anonymised (blackhole addresses)
         strip_iso_date_fractional_suffix: When True, strip fractional seconds (...T..:..:..<ms>Z to ...T..:..:..Z) on subscriber date columns
+        subscriber_csv_check_only: When True, run subscriber validations only (through date_validation); no mapping file or merge.
     
     Returns:
         dict: Processing results and file information
@@ -1559,7 +1935,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         subscribedata = _canonicalize_subscriber_headers(subscribedata)
     except ValueError as e:
         processing_time = time.time() - start_time
-        return {
+        err_ret = {
             'error': 'Validation failures detected',
             'validation_results': [{
                 'valid': False,
@@ -1572,43 +1948,46 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             'output_files': [],
             'processing_time': f'{processing_time:.2f} seconds',
         }
+        if subscriber_csv_check_only:
+            err_ret['subscriber_check_only'] = True
+        return err_ret
     _subscriber_report_columns = frozenset(
         c for c in subscribedata.columns if c != '_temp_row_id'
     )
     _subscriber_report_column_order = [
         c for c in subscribedata.columns if c != '_temp_row_id'
     ]
-    
-    if hasattr(mapping_file, 'read'):
-        # File object from React
-        mappingdata = pd.read_csv(mapping_file, encoding='latin-1')
-    else:
-        # File path
-        mappingdata = pd.read_csv(mapping_file, encoding='latin-1')
 
-    prov_lc = (provider or '').strip().lower()
-    if prov_lc == 'bluesnap':
-        mappingdata = _normalize_bluesnap_mapping_headers(mappingdata)
-    else:
-        mappingdata = _normalize_stripe_mapping_headers(mappingdata)
+    mappingdata = None
+    if not subscriber_csv_check_only:
+        if hasattr(mapping_file, 'read'):
+            mappingdata = pd.read_csv(mapping_file, encoding='latin-1')
+        else:
+            mappingdata = pd.read_csv(mapping_file, encoding='latin-1')
 
-    merge_key_check = validate_merge_key_columns_present(subscribedata, mappingdata, provider)
-    if not merge_key_check['valid']:
-        print(f"Merge key column validation failed: {merge_key_check['message']}")
-        processing_time = time.time() - start_time
-        return {
-            'error': 'Validation failures detected',
-            'validation_results': [{
-                'valid': False,
-                'step': 'merge_key_columns_validation',
-                'type': 'super_failure',
-                'message': merge_key_check['message'],
-            }],
-            'failed_count': 1,
-            'zip_file': None,
-            'output_files': [],
-            'processing_time': f'{processing_time:.2f} seconds',
-        }
+        prov_lc = (provider or '').strip().lower()
+        if prov_lc == 'bluesnap':
+            mappingdata = _normalize_bluesnap_mapping_headers(mappingdata)
+        else:
+            mappingdata = _normalize_stripe_mapping_headers(mappingdata)
+
+        merge_key_check = validate_merge_key_columns_present(subscribedata, mappingdata, provider)
+        if not merge_key_check['valid']:
+            print(f"Merge key column validation failed: {merge_key_check['message']}")
+            processing_time = time.time() - start_time
+            return {
+                'error': 'Validation failures detected',
+                'validation_results': [{
+                    'valid': False,
+                    'step': 'merge_key_columns_validation',
+                    'type': 'super_failure',
+                    'message': merge_key_check['message'],
+                }],
+                'failed_count': 1,
+                'zip_file': None,
+                'output_files': [],
+                'processing_time': f'{processing_time:.2f} seconds',
+            }
 
     print(subscribedata)
     
@@ -2168,7 +2547,31 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                 'step': 'date_validation',
                 'total_records': date_validation['total_records']
             })
-    
+
+    if subscriber_csv_check_only:
+        _run_zip_validations_subscriber_check_only(
+            subscribedata,
+            validation_results,
+            failed_row_ids,
+            seller_name,
+            is_sandbox,
+            provider,
+            autocorrect_us_zip,
+        )
+        print('Subscriber CSV check-only mode: skipping merge and mapping-dependent steps.')
+        result = _return_subscriber_csv_check_only_result(validation_results, start_time)
+        zip_bundle = _create_all_reports_zip_from_validation_downloads(
+            validation_results,
+            seller_name,
+            subscriber_filename,
+            provider,
+            is_sandbox,
+        )
+        if zip_bundle:
+            result['zip_file'] = zip_bundle
+            result['output_files'] = [zip_bundle]
+        return result
+
     # Provider-specific data processing
     if provider.lower() == 'bluesnap':
         print("Processing Bluesnap data format...")
@@ -2370,7 +2773,11 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                             # This ensures each row gets its specific zip code from the mapping file
                             if idx in completed.index:
                                 # Check if this is a US record for additional US-specific cleaning
-                                is_us_record = completed.loc[idx, 'address_country_code'] == 'US' if 'address_country_code' in completed.columns else False
+                                if 'address_country_code' in completed.columns:
+                                    raw_cc = completed.loc[idx, 'address_country_code']
+                                    is_us_record = pd.notna(raw_cc) and str(raw_cc).strip().upper() == 'US'
+                                else:
+                                    is_us_record = False
                                 
                                 if is_us_record:
                                     # For US records only: handle ZIP+4 format and extract digits
@@ -2494,16 +2901,16 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             })
     else:
         print(f"Missing zip code validation passed. All {missing_zip_validation['total_records']} records have zip codes.")
-        
+
         # Add successful missing zip code validation to results
-    validation_results.append({
-        'valid': True,
+        validation_results.append({
+            'valid': True,
             'step': 'missing_zip_code_validation',
             'total_records': missing_zip_validation['total_records'],
             'pulled_from_mapping_count': 0,  # No records pulled since validation passed without action
             'required_countries': missing_zip_validation.get('required_countries', []),
             'required_countries_dict': missing_zip_validation.get('required_countries_dict', {})
-    })
+        })
     
     # Provider-specific column removal and ordering
     if provider.lower() == 'stripe':
@@ -2783,42 +3190,13 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             print(f"US zip code validation failed. Found {us_zip_validation['incorrect_count']} incorrect formats.")
             print(f"Of these, {us_zip_validation['autocorrectable_count']} can be autocorrected with leading zeros.")
         
-        # Check if autocorrect is requested
             autocorrected_count = 0
             if autocorrect_us_zip and us_zip_validation['autocorrectable_count'] > 0:
                 print("Autocorrecting 4-digit US zip codes with leading zeros...")
-            
-                # Find US records with 4-digit zip codes and add leading zero
-                us_records_mask = completed['address_country_code'] == 'US'
-                
-                # Helper function to normalize zip codes (handle floats like 9003.0 -> '9003')
-                def normalize_zip_for_autocorrect(zip_val):
-                    if pd.isna(zip_val):
-                        return ''
-                    if isinstance(zip_val, float) and zip_val.is_integer():
-                        return str(int(zip_val))
-                    return str(zip_val).strip()
-                
-                # Create a copy of US records to work with
-                us_records_subset = completed.loc[us_records_mask, 'address_postal_code'].copy()
-                normalized_zips = us_records_subset.apply(normalize_zip_for_autocorrect)
-                four_digit_mask = normalized_zips.str.match(r'^\d{4}$')
-                
-                # Count how many will be corrected
-                autocorrected_count = int(four_digit_mask.sum())
-                
-                # Apply autocorrect - normalize first, then zfill
-                if autocorrected_count > 0:
-                    # Get the indices of records to correct
-                    indices_to_correct = us_records_subset[four_digit_mask].index
-                    completed.loc[indices_to_correct, 'address_postal_code'] = \
-                        normalized_zips.loc[indices_to_correct].str.zfill(5)
-                
+                autocorrected_count = _apply_us_zip_leading_zero_autocorrect(completed)
                 print(f"Autocorrected {autocorrected_count} US zip codes.")
-                
-                # Re-run US validation to check if all issues are resolved after autocorrecting
                 us_zip_validation = validate_us_zip_codes(completed, seller_name, is_sandbox)
-            
+
             # Save incorrect records to a file for download (whether autocorrected or not)
             download_file = None
             if us_zip_validation and not us_zip_validation['valid'] and us_zip_validation['incorrect_records'] is not None:
@@ -3160,20 +3538,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     failed_validations = [v for v in validation_results if not v.get('valid', True)]
     if failed_validations:
         print(f"Processing stopped due to {len(failed_validations)} validation failure(s).")
-        # Clean validation results for JSON serialization
-        clean_validation_results = []
-        for validation in validation_results:
-            clean_validation = {
-                'valid': validation.get('valid', True),
-                'step': validation.get('step', 'unknown')
-            }
-            # Add all other fields that exist
-            for key in ['missing_columns', 'total_columns', 'optional_columns', 'incorrect_count', 
-                       'total_records', 'download_file', 'error', 'missing_count', 'available_from_mapping',
-                       'pulled_from_mapping_count', 'autocorrectable_count', 'autocorrected', 'autocorrected_count', 'type', 'count', 'message']:
-                if key in validation:
-                    clean_validation[key] = validation[key]
-            clean_validation_results.append(clean_validation)
+        clean_validation_results = _clean_validation_results_for_response(validation_results)
         
         # Find zip file in output_files if it exists
         zip_file_info = None

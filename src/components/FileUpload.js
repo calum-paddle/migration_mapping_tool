@@ -39,6 +39,7 @@ const FileUpload = ({ onProcessingComplete }) => {
   const [autocorrectUsZipCodes, setAutocorrectUsZipCodes] = useState(false);
   const [stripIsoDateFractionalSuffix, setStripIsoDateFractionalSuffix] = useState(false);
   const [anonymiseEmailInSandbox, setAnonymiseEmailInSandbox] = useState(false);
+  const [subscriberCsvCheckOnlyNoTokens, setSubscriberCsvCheckOnlyNoTokens] = useState(false);
 
   const handleFileChange = (e, fileType) => {
     const file = e.target.files[0];
@@ -83,10 +84,15 @@ const FileUpload = ({ onProcessingComplete }) => {
     });
   };
 
-  const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, autocorrect = false, useMappingZip = false, anonymiseEmail = false, stripIsoFractional = false) => {
+  const processFiles = async (subFile, mapFile, seller, vault, sandbox, prov, autocorrect = false, useMappingZip = false, anonymiseEmail = false, stripIsoFractional = false, subscriberCheckOnly = false) => {
     const formData = new FormData();
     formData.append('subscriber_file', subFile);
-    formData.append('mapping_file', mapFile);
+    if (!subscriberCheckOnly && mapFile) {
+      formData.append('mapping_file', mapFile);
+    }
+    if (subscriberCheckOnly) {
+      formData.append('subscriber_csv_check_only', 'true');
+    }
     formData.append('seller_name', seller);
     formData.append('vault_provider', vault);
     formData.append('is_sandbox', sandbox);
@@ -103,7 +109,7 @@ const FileUpload = ({ onProcessingComplete }) => {
     }
 
     try {
-      setProcessingStatus('Uploading files...');
+      setProcessingStatus(subscriberCheckOnly ? 'Checking subscriber CSV…' : 'Uploading files...');
       setCurrentValidationStep('column_validation');
       const response = await fetch('/api/process-migration', {
         method: 'POST',
@@ -231,8 +237,10 @@ const FileUpload = ({ onProcessingComplete }) => {
           timestamp: Date.now()
         }));
         setValidationResults(prev => [...prev, ...newValidations]);
-        // Store zip file if available
-        if (result.output_files) {
+        // Store zip file if available (same as validation-failure path)
+        if (result.zip_file) {
+          setZipFile(result.zip_file);
+        } else if (result.output_files) {
           const zipFileInfo = result.output_files.find(f => f.is_zip);
           if (zipFileInfo) {
             setZipFile(zipFileInfo);
@@ -246,7 +254,11 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
       
       setIsProcessing(false);
-      setProcessingStatus('Processing completed successfully!');
+      setProcessingStatus(
+        result.subscriber_check_only
+          ? 'Subscriber CSV checks completed.'
+          : 'Processing completed successfully!'
+      );
     } catch (err) {
       setError('Error processing migration: ' + err.message);
       setIsProcessing(false);
@@ -338,15 +350,19 @@ const FileUpload = ({ onProcessingComplete }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     
-    if (!subscriberFile || !mappingFile || !sellerName || !vaultProvider) {
-      setError('Please fill in all required fields and upload both files.');
+    if (!subscriberFile || !sellerName || !vaultProvider) {
+      setError('Please fill in all required fields and upload the subscriber export.');
+      return;
+    }
+    if (!subscriberCsvCheckOnlyNoTokens && !mappingFile) {
+      setError('Please upload a mapping file, or enable “Subscriber Data CSV Check Only – No tokens”.');
       return;
     }
 
     // Reset all validation state when starting a new process
     resetValidationState();
     setIsProcessing(true);
-    setProcessingStatus('Processing migration...');
+    setProcessingStatus(subscriberCsvCheckOnlyNoTokens ? 'Checking subscriber CSV…' : 'Processing migration...');
 
     try {
       // Check if server is running
@@ -356,7 +372,19 @@ const FileUpload = ({ onProcessingComplete }) => {
       }
       
       // Process the migration with checkbox values
-      await processFiles(subscriberFile, mappingFile, sellerName, vaultProvider, isSandbox, provider, autocorrectUsZipCodes, useMappingZipCodes, anonymiseEmailInSandbox, stripIsoDateFractionalSuffix);
+      await processFiles(
+        subscriberFile,
+        mappingFile,
+        sellerName,
+        vaultProvider,
+        isSandbox,
+        provider,
+        autocorrectUsZipCodes,
+        useMappingZipCodes,
+        anonymiseEmailInSandbox,
+        stripIsoDateFractionalSuffix,
+        subscriberCsvCheckOnlyNoTokens
+      );
       
     } catch (err) {
       setError('Error processing migration: ' + err.message);
@@ -498,7 +526,7 @@ const FileUpload = ({ onProcessingComplete }) => {
           </div>
         </div>
 
-        <div className="form-group">
+        <div className={`form-group${subscriberCsvCheckOnlyNoTokens ? ' mapping-upload-disabled' : ''}`}>
           <label htmlFor="mappingFile">Mapping File:</label>
           <div className="file-input-wrapper">
             <input
@@ -506,7 +534,8 @@ const FileUpload = ({ onProcessingComplete }) => {
               id="mappingFile"
               accept=".csv,.txt"
               onChange={(e) => handleFileChange(e, 'mapping')}
-              required
+              required={!subscriberCsvCheckOnlyNoTokens}
+              disabled={subscriberCsvCheckOnlyNoTokens}
               className="hidden-file-input"
             />
             <span className="custom-file-button">Choose file</span>
@@ -522,13 +551,33 @@ const FileUpload = ({ onProcessingComplete }) => {
           </div>
         </div>
 
+        <div className="form-group subscriber-check-only-option">
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={subscriberCsvCheckOnlyNoTokens}
+              onChange={(e) => {
+                const on = e.target.checked;
+                setSubscriberCsvCheckOnlyNoTokens(on);
+                if (on) {
+                  setMappingFile(null);
+                  setMappingRecordCount(0);
+                }
+              }}
+              className="checkbox-input"
+            />
+            <span>Subscriber Data CSV Check Only - No tokens</span>
+          </label>
+        </div>
+
         <div className="checkbox-group">
           <div className="checkbox-item">
-            <label className="checkbox-label">
+            <label className={`checkbox-label${subscriberCsvCheckOnlyNoTokens ? ' checkbox-disabled' : ''}`}>
               <input
                 type="checkbox"
                 checked={useMappingZipCodes}
                 onChange={(e) => setUseMappingZipCodes(e.target.checked)}
+                disabled={subscriberCsvCheckOnlyNoTokens}
                 className="checkbox-input"
               />
               <span>Use ZIP Codes from Token file</span>
@@ -580,10 +629,10 @@ const FileUpload = ({ onProcessingComplete }) => {
           {isProcessing ? (
             <div className="loading-spinner">
               <div className="spinner"></div>
-              <span>Processing...</span>
+              <span>{subscriberCsvCheckOnlyNoTokens ? 'Checking…' : 'Processing...'}</span>
             </div>
           ) : (
-            'Process Migration'
+            subscriberCsvCheckOnlyNoTokens ? 'Check CSV File' : 'Process Migration'
           )}
         </button>
       </form>

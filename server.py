@@ -47,12 +47,8 @@ def process_migration_api():
         # Check if files are present
         if 'subscriber_file' not in request.files:
             return jsonify({'error': 'Subscriber file is required'}), 400
-        
-        if 'mapping_file' not in request.files:
-            return jsonify({'error': 'Mapping file is required'}), 400
-        
+
         subscriber_file = request.files['subscriber_file']
-        mapping_file = request.files['mapping_file']
         seller_name = request.form.get('seller_name', '')
         vault_provider = request.form.get('vault_provider', '')
         is_sandbox = request.form.get('is_sandbox', 'false').lower() == 'true'
@@ -64,62 +60,74 @@ def process_migration_api():
             request.form.get('strip_iso_date_fractional_suffix', 'false').lower() == 'true'
             or request.form.get('strip_iso_date_dot000_suffix', 'false').lower() == 'true'
         )
-        
+        subscriber_csv_check_only = (
+            request.form.get('subscriber_csv_check_only', 'false').lower() == 'true'
+        )
+
         # Validate files
         if subscriber_file.filename == '':
             return jsonify({'error': 'No subscriber file selected'}), 400
-        
-        if mapping_file.filename == '':
-            return jsonify({'error': 'No mapping file selected'}), 400
-        
+
+        if not subscriber_csv_check_only:
+            if 'mapping_file' not in request.files:
+                return jsonify({'error': 'Mapping file is required'}), 400
+            mapping_file = request.files['mapping_file']
+            if mapping_file.filename == '':
+                return jsonify({'error': 'No mapping file selected'}), 400
+            if not allowed_file(mapping_file.filename):
+                return jsonify({'error': 'Mapping file must be a CSV'}), 400
+        else:
+            mapping_file = request.files.get('mapping_file')
+
         if not allowed_file(subscriber_file.filename):
             return jsonify({'error': 'Subscriber file must be a CSV'}), 400
-        
-        if not allowed_file(mapping_file.filename):
-            return jsonify({'error': 'Mapping file must be a CSV'}), 400
-        
+
         if not seller_name:
             return jsonify({'error': 'Seller name is required'}), 400
-        
+
         if not vault_provider:
             return jsonify({'error': 'Vault provider name is required'}), 400
-        
+
         # Save uploaded files temporarily
         subscriber_filename = secure_filename(subscriber_file.filename)
-        mapping_filename = secure_filename(mapping_file.filename)
-        
         subscriber_path = os.path.join(app.config['UPLOAD_FOLDER'], subscriber_filename)
-        mapping_path = os.path.join(app.config['UPLOAD_FOLDER'], mapping_filename)
-        
         subscriber_file.save(subscriber_path)
-        mapping_file.save(mapping_path)
-        
+
+        mapping_path = None
+        if not subscriber_csv_check_only:
+            mapping_filename = secure_filename(mapping_file.filename)
+            mapping_path = os.path.join(app.config['UPLOAD_FOLDER'], mapping_filename)
+            mapping_file.save(mapping_path)
+
         # Call the migration processing function
         result = process_migration(
-            subscriber_path, 
-            mapping_path, 
-            vault_provider, 
-            is_sandbox, 
-            provider, 
+            subscriber_path,
+            mapping_path,
+            vault_provider,
+            is_sandbox,
+            provider,
             seller_name,
             autocorrect_us_zip,
             use_mapping_zip_codes,
             anonymise_email,
-            strip_iso_date_fractional_suffix
+            strip_iso_date_fractional_suffix,
+            subscriber_csv_check_only=subscriber_csv_check_only,
         )
-        
+
         # Check if validation failed (new format: all validations returned together)
         if 'error' in result and result.get('error') == 'Validation failures detected':
             # Clean up uploaded files
             os.remove(subscriber_path)
-            os.remove(mapping_path)
+            if mapping_path is not None:
+                os.remove(mapping_path)
             return jsonify(result)
         
         # Check if validation failed (old format: single validation failure)
         if 'error' in result and result.get('step') in ['column_validation', 'card_token_presence_validation', 'customer_email_presence_validation', 'status_presence_validation', 'currency_code_presence_validation', 'collection_mode_presence_validation', 'subscription_external_id_presence_validation', 'date_format_validation', 'date_validation', 'address_country_code_validation', 'price_id_validation', 'unsupported_countries_validation', 'ca_zip_code_validation', 'us_zip_code_validation', 'missing_zip_code_validation']:
             # Clean up uploaded files
             os.remove(subscriber_path)
-            os.remove(mapping_path)
+            if mapping_path is not None:
+                os.remove(mapping_path)
             return jsonify(result)
         
         # Update file URLs to be downloadable
@@ -128,8 +136,9 @@ def process_migration_api():
         
         # Clean up uploaded files
         os.remove(subscriber_path)
-        os.remove(mapping_path)
-        
+        if mapping_path is not None:
+            os.remove(mapping_path)
+
         return jsonify(result)
         
     except Exception as e:

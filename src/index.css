@@ -1079,4 +1079,20 @@ input:checked + .slider:before {
 
 .record-count {
   font-weight: 600;
+}
+
+.file-upload-container .mapping-upload-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.file-upload-container .subscriber-check-only-option {
+  margin-top: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.file-upload-container .checkbox-label.checkbox-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 } 
