@@ -657,12 +657,13 @@ def _resolve_subscriber_column_case_insensitive(subscriber_data, logical_name):
 def _validate_subscriber_column_presence(subscriber_data, column_name):
     """
     Every row must have a non-empty value in column_name.
-    If the column is missing, returns valid True (column_validation reports missing headers).
+    If the column is missing, returns invalid with a clear error message.
     """
     try:
         if column_name not in subscriber_data.columns:
             return {
-                'valid': True,
+                'valid': False,
+                'error': f"Unable to validate as column is missing: {column_name}",
                 'incorrect_count': 0,
                 'total_records': len(subscriber_data),
                 'incorrect_records': None,
@@ -723,13 +724,14 @@ def validate_subscription_status(subscriber_data, seller_name='', is_sandbox=Fal
     """
     Each row's status must be non-empty and one of: active, trialing, paused (case-insensitive).
     Paused rows are valid for processing; callers may report them separately as an alert (not excluded).
-    If the status column is missing, returns valid True (column_validation reports missing headers).
+    If the status column is missing, returns invalid with a clear error message.
     """
     try:
         status_col = _resolve_subscriber_column_case_insensitive(subscriber_data, 'status')
         if status_col is None:
             return {
-                'valid': True,
+                'valid': False,
+                'error': 'Unable to validate as column is missing: status',
                 'incorrect_count': 0,
                 'total_records': len(subscriber_data),
                 'incorrect_records': None,
@@ -2914,7 +2916,7 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
         'message': f'Found {len(no_tokens)} records with no matching token in mapping file.' if len(no_tokens) > 0 else 'All records have matching tokens in mapping file.'
     })
     
-    # Add successfully mapped records as a validation box
+    # Add successfully mapped records as a validation box (always show, including zero mapped)
     if len(success) > 0:
         success_filename = f'{base_filename}_final_import.csv'
         validation_results.append({
@@ -2924,6 +2926,15 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
             'count': len(success),
             'download_file': success_filename,
             'message': f'Successfully mapped {len(success)} records ready for import.'
+        })
+    else:
+        validation_results.append({
+            'valid': False,
+            'step': 'successfully_mapped_records',
+            'type': 'error',
+            'count': 0,
+            'download_file': None,
+            'message': 'Unable to successfully map any records.',
         })
     
     processing_time = time.time() - start_time

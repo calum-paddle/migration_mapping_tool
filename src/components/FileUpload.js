@@ -180,7 +180,7 @@ const FileUpload = ({ onProcessingComplete }) => {
         }
         // Initialize expanded state: all collapsible boxes start collapsed except successfully mapped records
         const initialExpanded = new Set(
-          allValidations.filter(v => v.step === 'successfully_mapped_records').map(v => v.step)
+          allValidations.filter(v => v.step === 'successfully_mapped_records' && v.valid).map(v => v.step)
         );
         setExpandedValidations(initialExpanded);
         setIsProcessing(false);
@@ -240,7 +240,7 @@ const FileUpload = ({ onProcessingComplete }) => {
         }
         // All collapsible boxes start collapsed except successfully mapped records
         const initialExpanded = new Set(
-          newValidations.filter(v => v.step === 'successfully_mapped_records').map(v => v.step)
+          newValidations.filter(v => v.step === 'successfully_mapped_records' && v.valid).map(v => v.step)
         );
         setExpandedValidations(initialExpanded);
       }
@@ -531,11 +531,11 @@ const FileUpload = ({ onProcessingComplete }) => {
                 onChange={(e) => setUseMappingZipCodes(e.target.checked)}
                 className="checkbox-input"
               />
-              <span>Use Mapping ZIP Codes</span>
+              <span>Use ZIP Codes from Token file</span>
               <div className="info-icon-wrapper">
                 <span className="info-icon">ℹ️</span>
                 <div className="tooltip">
-                  If any required ZIP codes are missing, use ZIP codes from the mapping file if available.
+                  If any required ZIP codes are missing, use ZIP codes from the token file if available.
                 </div>
               </div>
             </label>
@@ -615,6 +615,7 @@ const FileUpload = ({ onProcessingComplete }) => {
       {validationResults.map((validation, index) => {
         const isExpanded = expandedValidations.has(validation.step);
         const isWarning = validation.type === 'warning';
+        const isUnableToValidate = typeof validation.error === 'string' && validation.error.startsWith('Unable to validate as column is missing');
         
         // Determine if validation box should be collapsible
         // Failed validations and warnings are always collapsible
@@ -635,12 +636,19 @@ const FileUpload = ({ onProcessingComplete }) => {
           }
           // Other successful validations with no additional content are not collapsible
         }
+
+        if (validation.step === 'successfully_mapped_records' && !validation.valid) {
+          isCollapsible = false;
+        }
         
         const validationKey = validation.timestamp || index;
         
-        const isSuccessfullyMapped = validation.step === 'successfully_mapped_records';
+        const isSuccessfullyMappedSuccess =
+          validation.step === 'successfully_mapped_records' && validation.valid;
+        const isSuccessfullyMappedFailure =
+          validation.step === 'successfully_mapped_records' && !validation.valid;
         return (
-        <div key={validationKey} className={`validation-result ${isSuccessfullyMapped ? 'super-success' : (isWarning ? 'warning' : (validation.valid ? 'valid' : 'invalid'))}`}>
+        <div key={validationKey} className={`validation-result ${isSuccessfullyMappedSuccess ? 'super-success' : isSuccessfullyMappedFailure ? 'super-failure' : (isWarning ? 'warning' : (validation.valid ? 'valid' : 'invalid'))}`}>
           <div 
             className="validation-header" 
             onClick={isCollapsible ? () => toggleValidation(validation.step) : undefined}
@@ -662,17 +670,17 @@ const FileUpload = ({ onProcessingComplete }) => {
                 : validation.step === 'price_id_validation'
                 ? (validation.valid ? 'Price ID validation passed' : `Price ID validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'card_token_presence_validation'
-                ? (validation.valid ? 'Card token value validation passed' : `Card token value validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                ? (validation.valid ? 'Card token value validation passed' : (isUnableToValidate ? 'Card token value validation - Unable to validate' : `Card token value validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
                 : validation.step === 'customer_email_presence_validation'
-                ? (validation.valid ? 'Customer email validation passed' : `Customer email validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                ? (validation.valid ? 'Customer email validation passed' : (isUnableToValidate ? 'Customer email validation - Unable to validate' : `Customer email validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
                 : validation.step === 'status_presence_validation'
-                ? (validation.valid ? 'Status validation passed' : `Status validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                ? (validation.valid ? 'Status validation passed' : (isUnableToValidate ? 'Status validation - Unable to validate' : `Status validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
                 : validation.step === 'currency_code_presence_validation'
-                ? (validation.valid ? 'Currency code validation passed' : `Currency code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                ? (validation.valid ? 'Currency code validation passed' : (isUnableToValidate ? 'Currency code validation - Unable to validate' : `Currency code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
                 : validation.step === 'collection_mode_presence_validation'
-                ? (validation.valid ? 'Collection mode validation passed' : `Collection mode validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                ? (validation.valid ? 'Collection mode validation passed' : (isUnableToValidate ? 'Collection mode validation - Unable to validate' : `Collection mode validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
                 : validation.step === 'subscription_external_id_presence_validation'
-                ? (validation.valid ? 'Subscription external ID validation passed' : `Subscription external ID validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
+                ? (validation.valid ? 'Subscription external ID validation passed' : (isUnableToValidate ? 'Subscription external ID validation - Unable to validate' : `Subscription external ID validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
                 : validation.step === 'date_format_validation'
                 ? (validation.valid ? 'Date format validation passed' : `Date format validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'date_validation'
@@ -707,7 +715,9 @@ const FileUpload = ({ onProcessingComplete }) => {
                 : validation.step === 'no_token_found'
                 ? (validation.valid ? 'No token found validation passed' : `No token found (${validation.count})`)
                 : validation.step === 'successfully_mapped_records'
-                ? `Successfully mapped records (${validation.count})`
+                ? (validation.valid
+                  ? `Successfully mapped records (${validation.count})`
+                  : 'Unable to successfully map any records')
                 : validation.step === 'duplicate_detection'
                 ? 'Duplicate detection requires input'
                 : (validation.valid ? `${validation.step} passed` : `${validation.step} failed`)
@@ -820,8 +830,14 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <div className="missing-columns">
-                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} subscription rows with no card token value.</strong></p>
-                    <p>Click the download icon to get a report of all incorrect records.</p>
+                    {validation.error ? (
+                      <p><strong>{validation.error}</strong></p>
+                    ) : (
+                      <>
+                        <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} subscription rows with no card token value.</strong></p>
+                        <p>Click the download icon to get a report of all incorrect records.</p>
+                      </>
+                    )}
                   </div>
                 )}
               </>
@@ -829,8 +845,14 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <div className="missing-columns">
-                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing customer email.</strong></p>
-                    <p>Click the download icon to get a report of all incorrect records.</p>
+                    {validation.error ? (
+                      <p><strong>{validation.error}</strong></p>
+                    ) : (
+                      <>
+                        <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing customer email.</strong></p>
+                        <p>Click the download icon to get a report of all incorrect records.</p>
+                      </>
+                    )}
                   </div>
                 )}
               </>
@@ -838,9 +860,15 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <div className="missing-columns">
-                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with invalid or missing status.</strong></p>
-                    <p>Allowed values are <code>active</code>, <code>trialing</code>, and <code>paused</code> (case-insensitive).</p>
-                    <p>Click the download icon to get a report of all incorrect records.</p>
+                    {validation.error ? (
+                      <p><strong>{validation.error}</strong></p>
+                    ) : (
+                      <>
+                        <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with invalid or missing status.</strong></p>
+                        <p>Allowed values are <code>active</code>, <code>trialing</code>, and <code>paused</code> (case-insensitive).</p>
+                        <p>Click the download icon to get a report of all incorrect records.</p>
+                      </>
+                    )}
                   </div>
                 )}
               </>
@@ -848,8 +876,14 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <div className="missing-columns">
-                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing currency code.</strong></p>
-                    <p>Click the download icon to get a report of all incorrect records.</p>
+                    {validation.error ? (
+                      <p><strong>{validation.error}</strong></p>
+                    ) : (
+                      <>
+                        <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing currency code.</strong></p>
+                        <p>Click the download icon to get a report of all incorrect records.</p>
+                      </>
+                    )}
                   </div>
                 )}
               </>
@@ -857,8 +891,14 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <div className="missing-columns">
-                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing collection mode.</strong></p>
-                    <p>Click the download icon to get a report of all incorrect records.</p>
+                    {validation.error ? (
+                      <p><strong>{validation.error}</strong></p>
+                    ) : (
+                      <>
+                        <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing collection mode.</strong></p>
+                        <p>Click the download icon to get a report of all incorrect records.</p>
+                      </>
+                    )}
                   </div>
                 )}
               </>
@@ -866,8 +906,14 @@ const FileUpload = ({ onProcessingComplete }) => {
               <>
                 {!validation.valid && (
                   <div className="missing-columns">
-                    <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing subscription external ID.</strong></p>
-                    <p>Click the download icon to get a report of all incorrect records.</p>
+                    {validation.error ? (
+                      <p><strong>{validation.error}</strong></p>
+                    ) : (
+                      <>
+                        <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing subscription external ID.</strong></p>
+                        <p>Click the download icon to get a report of all incorrect records.</p>
+                      </>
+                    )}
                   </div>
                 )}
               </>
