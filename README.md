@@ -4,13 +4,7 @@ A React-based frontend application for migrating data from Stripe or Bluesnap to
 
 ## 🚀 Quick Start
 
-**Get up and running in 3 steps:**
-
-1. **Clone the repository** (if you haven't already):
-   ```bash
-   git clone https://github.com/calum-paddle/migration_mapping_tool.git
-   cd migration_mapping_tool
-   ```
+1. Clone the repo and `cd` into this project.
 
 2. **Run the setup script**:
    ```bash
@@ -18,7 +12,7 @@ A React-based frontend application for migrating data from Stripe or Bluesnap to
    ```
    This will create a virtual environment and install all dependencies.
 
-3. **Start the application**:
+3. **Start the app**:
    ```bash
    python3 start.py
    ```
@@ -39,12 +33,12 @@ The setup script will check these for you automatically.
 
 - **Modern React Interface**: Clean, responsive UI inspired by Paddle Billing design
 - **Dual Environment Support**: Toggle between production and sandbox modes
-- **File Upload**: Drag-and-drop CSV file upload functionality
+- **File Upload**: CSV upload via file picker (subscriber export and token file)
 - **Data Processing**: Unified Python backend for data migration
 - **Duplicate Detection**: Comprehensive duplicate detection across multiple fields (tokens, card IDs, subscription IDs, emails)
 - **Data Anonymization**: Optional email anonymization in sandbox mode (toggle when Sandbox is selected)
 - **Comprehensive Validation**: Column, unsupported countries, date format, date period, and zip code validation with downloadable error reports
-- **Zip Code Handling**: Options to use mapping file zip codes and autocorrect US zip codes with leading zeros via checkboxes
+- **Zip Code Handling**: Optional use of ZIP codes from the token file and US ZIP leading-zero autocorrect (checkboxes)
 - **Collapsible UI**: Validation boxes can be collapsed/expanded for better organization
 - **Results Summary**: Detailed processing results and statistics displayed on a single page
 - **File Downloads**: Easy download of individual reports or all reports in a zip file
@@ -199,18 +193,20 @@ This automatically:
 
 ### Using the Migration Tool
 
-1. **Select Provider**: Choose between Stripe or Bluesnap
-2. **Select Environment**: Toggle between Production and Sandbox modes. When Sandbox is selected, an **Anonymise email addresses** toggle appears—enable it to replace customer emails with blackhole addresses.
-3. **Enter Vault Provider**: Provide the name of your vault provider
-4. **Enter Seller Name**: Provide the seller name for file naming
-5. **Configure Options** (optional):
-   - **Use Mapping ZIP Codes**: If checked, missing zip codes will be pulled from the mapping file if available
-   - **Autocorrect US ZIP codes leading zeros**: If checked, 4-digit US zip codes will have a leading zero added
+1. **Seller Name**: Enter the seller name (used for output file naming).
+2. **Vault Provider**: Choose **Ixopay (fka TokenEx)** or **Other**. If you choose Other, type the vault provider name in the field that appears.
+3. **Payment Service Provider**: Choose **Stripe** or **Bluesnap**.
+4. **Environment**: Choose **Production** or **Sandbox**. When Sandbox is selected, you can enable **Anonymise email addresses** to replace customer emails with blackhole addresses (names preserved).
+5. **Configure Options** (optional checkboxes):
+   - **Use ZIP Codes from Token file**: If checked, missing ZIP codes can be filled from the token file when available.
+   - **Remove fractional seconds from dates (common Stripe format)**: Normalises ISO timestamps on relevant date columns.
+   - **Autocorrect US ZIP codes leading zeros**: If checked, 4-digit US ZIP codes get a leading zero.
+   - **Subscriber Data CSV Check Only – No tokens**: Validate the subscriber CSV only; the token file upload is disabled and the primary action becomes **Check CSV File** instead of full migration processing.
 6. **Upload Files**:
-   - **Subscriber Export File**: CSV file containing subscriber data from Stripe or Bluesnap
-   - **Mapping File**: CSV file containing mapping data (TokenEx for Stripe, or Bluesnap mapping file)
-7. **Process Migration**: Click "Process Migration" to start the data processing
-8. **Review Results**: All validation results, duplicate warnings, and successfully mapped records are displayed on one page with downloadable reports
+   - **Subscriber Export File**: CSV containing subscriber data from Stripe or Bluesnap.
+   - **Token File**: CSV containing token/mapping data (Stripe export format for Ixopay/TokenEx, or Bluesnap format as applicable). Not required when subscriber check-only mode is enabled.
+7. **Process Migration** (or **Check CSV File** in check-only mode): Start processing.
+8. **Review Results**: Validation results, duplicate warnings, and successfully mapped records appear on one page with downloadable reports.
 
 ### Environment Modes
 
@@ -236,10 +232,10 @@ The migration process performs comprehensive validation checks in the following 
 2. **Unsupported Countries Validation**: Checks that `address_country_code` does not contain unsupported countries (AF, AQ, BY, MM, CF, CU, CD, HT, IR, IQ, LY, ML, AN, NI, KP, RU, SO, SS, SD, SY, VE, YE, ZW)
 3. **Date Format Validation**: Validates that `current_period_started_at` and `current_period_ends_at` are in ISO 8601 format (YYYY-MM-DDTHH:MM:SSZ)
 4. **Date Period Validation**: Ensures date periods are logical (`current_period_started_at` dates should not be in the future, `current_period_ends_at` dates should not be in the past)
-5. **Missing Zip Code Validation**: Checks for missing zip codes in required countries (AU, CA, FR, DE, IN, IT, NL, ES, GB, US). Can optionally pull missing zip codes from the mapping file if the checkbox is enabled
+5. **Missing Zip Code Validation**: Checks for missing zip codes in required countries (AU, CA, FR, DE, IN, IT, NL, ES, GB, US). Can optionally pull missing ZIP codes from the token file if **Use ZIP Codes from Token file** is enabled
 6. **Canadian Zip Code Validation**: Validates Canadian zip code format (Letter-Number-Letter Number-Letter-Number)
 7. **US Zip Code Validation**: Validates US zip code format (exactly 5 digits, with optional autocorrection for 4-digit codes if the checkbox is enabled)
-8. **No Token Found**: Identifies records with no matching token in the mapping file
+8. **No Token Found**: Identifies records with no matching token in the token file
 9. **Successfully Mapped Records**: Shows the final count of records ready for import
 
 All validation results are displayed on a single page with downloadable error reports. Validation boxes are collapsible (except when they pass without additional content). A "Download All Reports" button provides a zip file containing all validation failures, duplicate warnings, no token found records, and successfully mapped records.
@@ -263,7 +259,7 @@ Duplicate detection runs even if validation checks fail, allowing you to see all
 
 To change the list of unsupported countries that will cause validation to fail, edit the `unsupported_countries_dict` dictionary in the `validate_unsupported_countries()` function in `migration-import-unified.py`.
 
-**Location**: `migration-import-unified.py`, line ~160
+**Location**: `migration-import-unified.py`, inside `validate_unsupported_countries()` (see `unsupported_countries_dict`, ~line 487)
 
 **Example**:
 ```python
@@ -287,7 +283,7 @@ unsupported_countries_dict = {
 
 To change the list of countries that require zip codes, edit the `required_countries_dict` dictionary in the `validate_missing_zip_codes()` function in `migration-import-unified.py`.
 
-**Location**: `migration-import-unified.py`, line ~438
+**Location**: `migration-import-unified.py`, inside `validate_missing_zip_codes()` (see `required_countries_dict`, ~line 1572)
 
 **Example**:
 ```python
@@ -334,7 +330,7 @@ The unified Python script can also be used directly:
 python migration-import-unified.py subscriber_file.csv mapping_file.csv vault_provider_name [--sandbox] [--anonymise-email]
 ```
 
-Use `--anonymise-email` together with `--sandbox` to replace customer emails with blackhole addresses. Without `--anonymise-email`, sandbox runs keep real emails and duplicate email detection runs as in production.
+The second CSV path is the **token file** (same data as the **Token File** upload in the UI; the script still uses the parameter name `mapping_file` internally). Use `--anonymise-email` together with `--sandbox` to replace customer emails with blackhole addresses. Without `--anonymise-email`, sandbox runs keep real emails and duplicate email detection runs as in production.
 
 ### Script Features
 
@@ -360,7 +356,9 @@ Required columns:
 - `address_postal_code`: Customer postal/zip code
 - `address_country_code`: Customer country code (required for zip code validation)
 
-### Mapping File (CSV)
+### Token File (CSV)
+
+This file is labelled **Token File** in the UI; it is the token/mapping export (Stripe/Ixopay or Bluesnap) paired with the subscriber export.
 
 **For Stripe:**
 - `card.id`: Card ID for mapping (e.g., `pm_xxx`)
@@ -436,11 +434,7 @@ The application includes comprehensive error handling:
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+Branch, change, test, pull request—same as whatever workflow your repo uses.
 
 ## License
 
