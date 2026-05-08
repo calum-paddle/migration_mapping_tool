@@ -640,15 +640,19 @@ const FileUpload = ({ onProcessingComplete }) => {
         if (validation.step === 'successfully_mapped_records' && !validation.valid) {
           isCollapsible = false;
         }
+        if (validation.type === 'super_failure') {
+          isCollapsible = false;
+        }
         
         const validationKey = validation.timestamp || index;
         
         const isSuccessfullyMappedSuccess =
           validation.step === 'successfully_mapped_records' && validation.valid;
-        const isSuccessfullyMappedFailure =
-          validation.step === 'successfully_mapped_records' && !validation.valid;
+        const isSuperFailureStyle =
+          validation.type === 'super_failure' ||
+          (validation.step === 'successfully_mapped_records' && !validation.valid);
         return (
-        <div key={validationKey} className={`validation-result ${isSuccessfullyMappedSuccess ? 'super-success' : isSuccessfullyMappedFailure ? 'super-failure' : (isWarning ? 'warning' : (validation.valid ? 'valid' : 'invalid'))}`}>
+        <div key={validationKey} className={`validation-result ${isSuccessfullyMappedSuccess ? 'super-success' : isSuperFailureStyle ? 'super-failure' : (isWarning ? 'warning' : (validation.valid ? 'valid' : 'invalid'))}`}>
           <div 
             className="validation-header" 
             onClick={isCollapsible ? () => toggleValidation(validation.step) : undefined}
@@ -663,7 +667,11 @@ const FileUpload = ({ onProcessingComplete }) => {
               {isWarning ? '⚠' : (validation.valid ? '✓' : '✗')}
             </span>
             <span className="validation-title">
-              {validation.step === 'column_validation' 
+              {validation.step === 'merge_key_columns_validation'
+                ? 'Unable to merge — required columns missing'
+              : validation.step === 'subscriber_header_normalization'
+                ? 'Unable to process — ambiguous subscription columns'
+              : validation.step === 'column_validation' 
                 ? (validation.valid ? 'Column validation passed' : `Column validation failed${validation.missing_columns ? ` (${validation.missing_columns.length})` : ''}`)
                 : validation.step === 'address_country_code_validation'
                 ? (validation.valid ? 'Address country code validation passed' : `Address country code validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
@@ -773,6 +781,14 @@ const FileUpload = ({ onProcessingComplete }) => {
                     </p>
                   </div>
                 )}
+              </>
+            ) : validation.step === 'merge_key_columns_validation' ? (
+              <>
+                <p>{validation.message}</p>
+              </>
+            ) : validation.step === 'subscriber_header_normalization' ? (
+              <>
+                <p>{validation.message}</p>
               </>
             ) : validation.step === 'column_validation' ? (
               <>

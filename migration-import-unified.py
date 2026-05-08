@@ -227,6 +227,138 @@ def strip_iso_fractional_seconds_z_suffixes(subscriber_df, enabled):
 _SUB_CUSTOM_KEY_RE = re.compile(r'^subscription_custom_data_key_(\d+)$')
 _SUB_CUSTOM_VALUE_RE = re.compile(r'^subscription_custom_data_value_(\d+)$')
 
+# Single source of truth for Paddle subscription CSV required headers (canonical snake_case).
+SUBSCRIBER_REQUIRED_COLUMNS = (
+    'customer_email',
+    'customer_full_name',
+    'customer_external_id',
+    'business_tax_identifier',
+    'business_name',
+    'business_company_number',
+    'business_external_id',
+    'address_country_code',
+    'address_street_line1',
+    'address_street_line2',
+    'address_city',
+    'address_region',
+    'address_postal_code',
+    'address_external_id',
+    'status',
+    'currency_code',
+    'started_at',
+    'paused_at',
+    'collection_mode',
+    'enable_checkout',
+    'purchase_order_number',
+    'additional_information',
+    'payment_terms_frequency',
+    'payment_terms_interval',
+    'current_period_started_at',
+    'current_period_ends_at',
+    'trial_period_frequency',
+    'trial_period_interval',
+    'subscription_external_id',
+    'card_token',
+    'discount_id',
+    'discount_remaining_cycles',
+    'subscription_custom_data_key_1',
+    'subscription_custom_data_value_1',
+    'price_id_1',
+    'quantity_1',
+)
+
+_SUBSCRIBER_OPTIONAL_HEADER_RULES = (
+    (re.compile(r'^subscription_custom_data_key_(\d+)$', re.I),
+     lambda m: f'subscription_custom_data_key_{int(m.group(1))}'),
+    (re.compile(r'^subscription_custom_data_value_(\d+)$', re.I),
+     lambda m: f'subscription_custom_data_value_{int(m.group(1))}'),
+    (re.compile(r'^price_id_(\d+)$', re.I),
+     lambda m: f'price_id_{int(m.group(1))}'),
+    (re.compile(r'^quantity_(\d+)$', re.I),
+     lambda m: f'quantity_{int(m.group(1))}'),
+)
+
+# Mapping CSV headers referenced by merge / rename / validation — normalized with trim + case-insensitive match.
+_STRIPE_MAPPING_HEADER_CANONICAL = (
+    'card.id',
+    'card.transaction_ids',
+    'card.number',
+    'card.name',
+    'card.exp_month',
+    'card.exp_year',
+    'card.address_zip',
+    'card.address_city',
+    'card.address_country',
+    'card.address_line1',
+    'card.address_line2',
+    'card.address_state',
+    'description',
+    'name',
+    'default_source',
+    'email',
+    'id',
+)
+
+_BLUESNAP_MAPPING_HEADER_CANONICAL = (
+    'BlueSnap Account Id',
+    'Credit Card Number',
+    'First Name',
+    'Last Name',
+    'Expiration Month',
+    'Expiration Year',
+    'Network Transaction Id',
+    'Zip Code',
+)
+
+
+def _canonicalize_subscriber_headers(subscriber_df):
+    """
+    Rename subscription CSV headers to canonical snake_case when they differ only by case,
+    including numbered optional columns (price_id_N, quantity_N, custom data pairs).
+    """
+    if subscriber_df is None or getattr(subscriber_df, 'empty', True):
+        return subscriber_df
+    fixed_lower = {name.lower(): name for name in SUBSCRIBER_REQUIRED_COLUMNS}
+    renames = {}
+    for col in list(subscriber_df.columns):
+        if col == '_temp_row_id':
+            continue
+        s = str(col).strip()
+        sl = s.lower()
+        if sl in fixed_lower:
+            canon = fixed_lower[sl]
+            if s != canon:
+                renames[col] = canon
+            continue
+        matched = False
+        for rx, fmt in _SUBSCRIBER_OPTIONAL_HEADER_RULES:
+            m = rx.match(s)
+            if m:
+                canon = fmt(m)
+                if s != canon:
+                    renames[col] = canon
+                matched = True
+                break
+        if matched:
+            continue
+    if not renames:
+        return subscriber_df
+    final_names = []
+    seen_final = set()
+    collisions = []
+    for col in subscriber_df.columns:
+        new_name = renames.get(col, col)
+        if new_name in seen_final:
+            collisions.append(new_name)
+        seen_final.add(new_name)
+        final_names.append(new_name)
+    if collisions:
+        raise ValueError(
+            'Ambiguous subscriber headers after case normalization (duplicate logical columns): '
+            + ', '.join(sorted(set(str(x) for x in collisions)))
+        )
+    return subscriber_df.rename(columns=renames)
+
 
 def ordered_subscription_custom_data_columns(columns):
     """
@@ -262,45 +394,7 @@ def validate_subscriber_columns(columns):
     Returns:
         dict: Validation results with status and missing columns
     """
-    # Required columns (exact names)
-    required_columns = [
-        'customer_email',
-        'customer_full_name', 
-        'customer_external_id',
-        'business_tax_identifier',
-        'business_name',
-        'business_company_number',
-        'business_external_id',
-        'address_country_code',
-        'address_street_line1',
-        'address_street_line2',
-        'address_city',
-        'address_region',
-        'address_postal_code',
-        'address_external_id',
-        'status',
-        'currency_code',
-        'started_at',
-        'paused_at',
-        'collection_mode',
-        'enable_checkout',
-        'purchase_order_number',
-        'additional_information',
-        'payment_terms_frequency',
-        'payment_terms_interval',
-        'current_period_started_at',
-        'current_period_ends_at',
-        'trial_period_frequency',
-        'trial_period_interval',
-        'subscription_external_id',
-        'card_token',
-        'discount_id',
-        'discount_remaining_cycles',
-        'subscription_custom_data_key_1',
-        'subscription_custom_data_value_1',
-        'price_id_1',
-        'quantity_1'
-    ]
+    required_columns = list(SUBSCRIBER_REQUIRED_COLUMNS)
     
     # Convert columns to list if it's a pandas Index
     if hasattr(columns, 'tolist'):
@@ -320,7 +414,7 @@ def validate_subscriber_columns(columns):
     optional_columns = []
     for pattern in optional_patterns:
         for col in columns:
-            if re.match(pattern, col) and col not in required_columns:
+            if re.match(pattern, col, re.IGNORECASE) and col not in required_columns:
                 optional_columns.append(col)
     
     return {
@@ -652,6 +746,88 @@ def _resolve_subscriber_column_case_insensitive(subscriber_data, logical_name):
         if str(c).strip().lower() == want:
             return c
     return None
+
+
+def _mapping_has_column(mapping_df, logical_name):
+    """Match mapping CSV headers with trim + case-insensitive compare (e.g. card.id)."""
+    want = logical_name.strip().lower()
+    for c in mapping_df.columns:
+        if str(c).strip().lower() == want:
+            return True
+    return False
+
+
+def _canonicalize_mapping_column(mapping_df, canonical_name):
+    """If canonical header missing but a case-insensitive match exists, rename that column to canonical_name."""
+    if canonical_name in mapping_df.columns:
+        return mapping_df
+    want = canonical_name.strip().lower()
+    for c in list(mapping_df.columns):
+        if str(c).strip().lower() == want:
+            return mapping_df.rename(columns={c: canonical_name})
+    return mapping_df
+
+
+def _normalize_bluesnap_mapping_headers(mapping_df):
+    """Ensure BlueSnap mapping columns match expected spelling for downstream indexing and rename()."""
+    out = mapping_df
+    for canonical in _BLUESNAP_MAPPING_HEADER_CANONICAL:
+        out = _canonicalize_mapping_column(out, canonical)
+    return out
+
+
+def _normalize_stripe_mapping_headers(mapping_df):
+    """Stripe exports use dotted headers; normalize casing so rename/dict access uses exact keys."""
+    out = mapping_df
+    for canonical in _STRIPE_MAPPING_HEADER_CANONICAL:
+        out = _canonicalize_mapping_column(out, canonical)
+    return out
+
+
+def validate_merge_key_columns_present(subscribedata, mappingdata, provider):
+    """
+    Required merge keys before any other validation:
+    - Subscriber: card_token (same header for Stripe and BlueSnap; case-insensitive match allowed).
+    - Stripe mapping: card.id (Stripe export column for card identifier — renamed to card_id before merge).
+    - BlueSnap mapping: BlueSnap Account Id and Credit Card Number (used to build card_token for merge);
+      headers matched case-insensitively (same as card.id on Stripe).
+    """
+    missing_subscriber = []
+    missing_mapping = []
+    if _resolve_subscriber_column_case_insensitive(subscribedata, 'card_token') is None:
+        missing_subscriber.append('card_token')
+
+    prov = (provider or '').strip().lower()
+    if prov == 'bluesnap':
+        if not _mapping_has_column(mappingdata, 'BlueSnap Account Id'):
+            missing_mapping.append('BlueSnap Account Id')
+        if not _mapping_has_column(mappingdata, 'Credit Card Number'):
+            missing_mapping.append('Credit Card Number')
+    else:
+        # Stripe (default): mapping export uses card.id
+        if not _mapping_has_column(mappingdata, 'card.id'):
+            missing_mapping.append('card.id')
+
+    if missing_subscriber or missing_mapping:
+        parts = []
+        if missing_subscriber:
+            parts.append(
+                'Subscriber export is missing required column(s): '
+                + ', '.join(missing_subscriber) + '.'
+            )
+        if missing_mapping:
+            parts.append(
+                'Token / mapping file is missing required column(s): '
+                + ', '.join(missing_mapping) + '.'
+            )
+        msg = (
+            ' '.join(parts)
+            + ' These columns are required to match subscriber rows to the token file. '
+            'Fix the CSV headers and run again.'
+        )
+        return {'valid': False, 'message': msg}
+
+    return {'valid': True}
 
 
 def _validate_subscriber_column_presence(subscriber_data, column_name):
@@ -1379,6 +1555,23 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     
     # Add temporary unique row ID to track records through merge and validations
     subscribedata['_temp_row_id'] = range(len(subscribedata))
+    try:
+        subscribedata = _canonicalize_subscriber_headers(subscribedata)
+    except ValueError as e:
+        processing_time = time.time() - start_time
+        return {
+            'error': 'Validation failures detected',
+            'validation_results': [{
+                'valid': False,
+                'step': 'subscriber_header_normalization',
+                'type': 'super_failure',
+                'message': str(e),
+            }],
+            'failed_count': 1,
+            'zip_file': None,
+            'output_files': [],
+            'processing_time': f'{processing_time:.2f} seconds',
+        }
     _subscriber_report_columns = frozenset(
         c for c in subscribedata.columns if c != '_temp_row_id'
     )
@@ -1392,7 +1585,31 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
     else:
         # File path
         mappingdata = pd.read_csv(mapping_file, encoding='latin-1')
-    
+
+    prov_lc = (provider or '').strip().lower()
+    if prov_lc == 'bluesnap':
+        mappingdata = _normalize_bluesnap_mapping_headers(mappingdata)
+    else:
+        mappingdata = _normalize_stripe_mapping_headers(mappingdata)
+
+    merge_key_check = validate_merge_key_columns_present(subscribedata, mappingdata, provider)
+    if not merge_key_check['valid']:
+        print(f"Merge key column validation failed: {merge_key_check['message']}")
+        processing_time = time.time() - start_time
+        return {
+            'error': 'Validation failures detected',
+            'validation_results': [{
+                'valid': False,
+                'step': 'merge_key_columns_validation',
+                'type': 'super_failure',
+                'message': merge_key_check['message'],
+            }],
+            'failed_count': 1,
+            'zip_file': None,
+            'output_files': [],
+            'processing_time': f'{processing_time:.2f} seconds',
+        }
+
     print(subscribedata)
     
     # Validate subscriber file columns
