@@ -1,40 +1,31 @@
+/* Spinner visuals live in index.css (.processing-spinner .spinner) */
+
 .processing-status {
   text-align: center;
-  padding: 2rem;
-  background-color: #f8f9fa;
-  border-radius: 8px;
+  padding: 2rem 1.5rem;
+  background: rgba(241, 245, 249, 0.9);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   margin: 1rem 0;
+  box-shadow: var(--shadow-sm);
 }
 
 .processing-spinner {
   margin-bottom: 1rem;
 }
 
-.spinner {
-  width: 40px;
-  height: 40px;
-  border: 4px solid #e9ecef;
-  border-top: 4px solid #ffc107;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-  margin: 0 auto;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
 .processing-text h4 {
   margin: 0 0 0.5rem 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #212529;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
 .processing-text p {
   margin: 0 0 1.5rem 0;
-  color: #6c757d;
+  color: var(--text-secondary);
+  font-size: 0.9375rem;
 }
 
 .processing-steps {
@@ -49,7 +40,8 @@
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
-  opacity: 0.5;
+  opacity: 0.45;
+  transition: opacity 0.2s ease;
 }
 
 .step.active {
@@ -57,24 +49,28 @@
 }
 
 .step-icon {
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background-color: #e9ecef;
+  background: rgba(226, 232, 240, 0.9);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 1rem;
-  color: #6c757d;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
 }
 
 .step.active .step-icon {
-  background-color: #ffc107;
-  color: white;
+  background: linear-gradient(135deg, #fde047 0%, var(--brand-warm) 100%);
+  color: #1e293b;
+  border-color: rgba(251, 191, 36, 0.6);
+  box-shadow: var(--shadow-sm);
 }
 
 .step span {
-  font-size: 0.875rem;
-  color: #6c757d;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
   text-align: center;
-} 
+  max-width: 120px;
+}

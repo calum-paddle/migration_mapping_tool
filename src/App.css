@@ -1,93 +1,99 @@
+/* App shell — uses tokens from index.css :root */
+
 .App {
   min-height: 100vh;
-  background: #f8f9fa;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  font-family: var(--font-sans);
+  background: var(--bg-page);
+  color: var(--text-primary);
 }
 
 .App-header {
-  background: #1a1a1a;
-  border-bottom: 1px solid #333;
-  padding: 0.25rem 2rem;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98) 0%, rgba(15, 23, 42, 0.92) 100%);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: var(--shadow-header);
 }
 
 .header-content {
-  max-width: 1200px;
+  max-width: 1120px;
   margin: 0 auto;
+  padding: 0.875rem 1.5rem;
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
 }
 
-.logo-section {
+.header-brand {
   display: flex;
   align-items: center;
   gap: 1rem;
-  justify-content: flex-start;
-  width: 100%;
-  position: relative;
-}
-
-.logo-section h1 {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  text-align: center;
 }
 
 .logo {
-  height: 80px;
+  height: 52px;
   width: auto;
   object-fit: contain;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.35));
+}
+
+.header-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.header-eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(253, 224, 71, 0.85);
 }
 
 .App-header h1 {
   margin: 0;
-  font-size: 1.5rem;
-  font-weight: 500;
-  color: white;
-  font-family: 'Helvetica Neue', 'Arial', sans-serif;
+  font-size: clamp(1.125rem, 2.5vw, 1.375rem);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: #f8fafc;
+  line-height: 1.2;
 }
 
 .App-main {
-  padding: 2rem;
-  background: white;
+  padding: 2rem 1.25rem 3rem;
+  min-height: calc(100vh - 72px);
 }
 
 .main-content {
-  max-width: 1200px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 0 2rem;
+  padding: 2rem 2.25rem;
+  background: var(--surface);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
 }
 
-.description-section {
-  margin-bottom: 2rem;
-}
-
-.description-section p {
-  font-size: 1.1rem;
-  color: #495057;
-  margin: 0;
-  font-weight: 500;
-}
-
-/* Responsive Design */
-@media (max-width: 768px) {
+@media (max-width: 640px) {
   .header-content {
-    padding: 0 1rem;
+    padding: 0.75rem 1rem;
   }
-  
+
+  .logo {
+    height: 44px;
+  }
+
+  .App-main {
+    padding: 1.25rem 1rem 2rem;
+  }
+
   .main-content {
-    padding: 0 1rem;
+    padding: 1.25rem 1.25rem;
+    border-radius: var(--radius-lg);
   }
-  
-  .App-header h1 {
-    font-size: 1.25rem;
-  }
-  
-  .description-section p {
-    font-size: 1rem;
-  }
-} 
+}

@@ -422,7 +422,7 @@ const FileUpload = ({ onProcessingComplete }) => {
               className={`provider-btn ${vaultProvider === 'TokenEx' ? 'selected' : ''}`}
               onClick={() => setVaultProvider('TokenEx')}
             >
-              TokenEx
+              Ixopay (fka TokenEx)
             </button>
             <button
               type="button"
@@ -527,7 +527,7 @@ const FileUpload = ({ onProcessingComplete }) => {
         </div>
 
         <div className={`form-group${subscriberCsvCheckOnlyNoTokens ? ' mapping-upload-disabled' : ''}`}>
-          <label htmlFor="mappingFile">Mapping File:</label>
+          <label htmlFor="mappingFile">Token File:</label>
           <div className="file-input-wrapper">
             <input
               type="file"

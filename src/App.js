@@ -14,9 +14,12 @@ function App() {
     <div className="App">
       <header className="App-header">
         <div className="header-content">
-          <div className="logo-section">
-            <img src="/paddle-logo-yellow.png" alt="Paddle Logo" className="logo" />
-            <h1>Migration Mapping Tool</h1>
+          <div className="header-brand">
+            <img src="/paddle-logo-yellow.png" alt="" className="logo" width={52} height={52} />
+            <div className="header-titles">
+              <span className="header-eyebrow">Paddle Billing</span>
+              <h1>Migration Mapping Tool</h1>
+            </div>
           </div>
         </div>
       </header>
