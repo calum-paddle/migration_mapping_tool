@@ -1349,6 +1349,186 @@ _SUBSCRIBER_FIELD_PRESENCE_CHECKS = (
 )
 
 
+def _is_ascii_non_negative_integer_string(value):
+    """True for digit-only strings including 0 (e.g. '0', '12'). False for empty, negatives, or floats like '2.0'."""
+    if _subscriber_presence_cell_empty(value):
+        return False
+    return bool(re.fullmatch(r'\d+', str(value).strip()))
+
+
+_ALLOWED_TRIAL_PERIOD_INTERVALS = frozenset({'day', 'week', 'month', 'year'})
+
+
+def _validation_missing_column_result(subscriber_data, missing_column):
+    return {
+        'valid': False,
+        'error': f'Unable to validate as column is missing: {missing_column}',
+        'incorrect_count': 0,
+        'total_records': len(subscriber_data) if subscriber_data is not None else 0,
+        'incorrect_records': None,
+        'failed_temp_row_ids': [],
+    }
+
+
+def _validation_exception_result(label, exc):
+    print(f"Error in {label}: {exc}")
+    import traceback
+    traceback.print_exc()
+    return {
+        'valid': False,
+        'error': f'Validation error: {str(exc)}',
+        'incorrect_count': 0,
+        'total_records': 0,
+        'incorrect_records': None,
+        'failed_temp_row_ids': [],
+    }
+
+
+def validate_paused_requires_paused_at(subscriber_data, seller_name='', is_sandbox=False):
+    """
+    Rows with status paused must have a non-empty paused_at value.
+    Format of paused_at is checked separately by date_format_validation.
+    """
+    try:
+        status_col = _resolve_subscriber_column_case_insensitive(subscriber_data, 'status')
+        if status_col is None:
+            return _validation_missing_column_result(subscriber_data, 'status')
+        paused_at_col = _resolve_subscriber_column_case_insensitive(subscriber_data, 'paused_at')
+        if paused_at_col is None:
+            return _validation_missing_column_result(subscriber_data, 'paused_at')
+
+        validation_data = subscriber_data.copy()
+        if '_temp_row_id' not in validation_data.columns:
+            validation_data['_temp_row_id'] = range(len(validation_data))
+
+        paused_mask = validation_data[status_col].apply(_normalized_subscription_status) == 'paused'
+        missing_paused_at = validation_data[paused_at_col].apply(_subscriber_presence_cell_empty)
+        incorrect_records = validation_data[paused_mask & missing_paused_at].copy()
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
+        incorrect_count = len(incorrect_records)
+        if not incorrect_records.empty:
+            incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
+        else:
+            incorrect_records = None
+
+        return {
+            'valid': incorrect_count == 0,
+            'incorrect_count': incorrect_count,
+            'incorrect_records': incorrect_records,
+            'failed_temp_row_ids': failed_temp_row_ids,
+            'total_records': len(validation_data),
+        }
+    except Exception as e:
+        return _validation_exception_result('paused requires paused_at validation', e)
+
+
+def validate_trialing_requires_trial_period(subscriber_data, seller_name='', is_sandbox=False):
+    """
+    Rows with status trialing must have:
+    - trial_period_frequency: non-negative integer digit string (0 allowed; no floats like 2.0)
+    - trial_period_interval: one of day, week, month, year (case-insensitive)
+    """
+    try:
+        status_col = _resolve_subscriber_column_case_insensitive(subscriber_data, 'status')
+        if status_col is None:
+            return _validation_missing_column_result(subscriber_data, 'status')
+        freq_col = _resolve_subscriber_column_case_insensitive(subscriber_data, 'trial_period_frequency')
+        if freq_col is None:
+            return _validation_missing_column_result(subscriber_data, 'trial_period_frequency')
+        interval_col = _resolve_subscriber_column_case_insensitive(subscriber_data, 'trial_period_interval')
+        if interval_col is None:
+            return _validation_missing_column_result(subscriber_data, 'trial_period_interval')
+
+        validation_data = subscriber_data.copy()
+        if '_temp_row_id' not in validation_data.columns:
+            validation_data['_temp_row_id'] = range(len(validation_data))
+
+        trialing_mask = validation_data[status_col].apply(_normalized_subscription_status) == 'trialing'
+        freq_ok = validation_data[freq_col].apply(_is_ascii_non_negative_integer_string)
+
+        def interval_ok(value):
+            if _subscriber_presence_cell_empty(value):
+                return False
+            return str(value).strip().lower() in _ALLOWED_TRIAL_PERIOD_INTERVALS
+
+        interval_ok_mask = validation_data[interval_col].apply(interval_ok)
+        incorrect_records = validation_data[trialing_mask & ~(freq_ok & interval_ok_mask)].copy()
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
+        incorrect_count = len(incorrect_records)
+        if not incorrect_records.empty:
+            incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
+        else:
+            incorrect_records = None
+
+        return {
+            'valid': incorrect_count == 0,
+            'incorrect_count': incorrect_count,
+            'incorrect_records': incorrect_records,
+            'failed_temp_row_ids': failed_temp_row_ids,
+            'total_records': len(validation_data),
+        }
+    except Exception as e:
+        return _validation_exception_result('trialing requires trial period validation', e)
+
+
+def validate_discount_requires_remaining_cycles(subscriber_data, seller_name='', is_sandbox=False):
+    """
+    When discount_id is non-empty, discount_remaining_cycles must be a non-negative integer
+    digit string (0 allowed; no floats like 2.0).
+    """
+    try:
+        discount_id_col = _resolve_subscriber_column_case_insensitive(subscriber_data, 'discount_id')
+        if discount_id_col is None:
+            return _validation_missing_column_result(subscriber_data, 'discount_id')
+        cycles_col = _resolve_subscriber_column_case_insensitive(subscriber_data, 'discount_remaining_cycles')
+        if cycles_col is None:
+            return _validation_missing_column_result(subscriber_data, 'discount_remaining_cycles')
+
+        validation_data = subscriber_data.copy()
+        if '_temp_row_id' not in validation_data.columns:
+            validation_data['_temp_row_id'] = range(len(validation_data))
+
+        has_discount = ~validation_data[discount_id_col].apply(_subscriber_presence_cell_empty)
+        cycles_ok = validation_data[cycles_col].apply(_is_ascii_non_negative_integer_string)
+        incorrect_records = validation_data[has_discount & ~cycles_ok].copy()
+        failed_temp_row_ids = extract_failed_temp_row_ids_from_df(incorrect_records)
+        incorrect_count = len(incorrect_records)
+        if not incorrect_records.empty:
+            incorrect_records = clean_dataframe_for_validation_report_csv(incorrect_records)
+        else:
+            incorrect_records = None
+
+        return {
+            'valid': incorrect_count == 0,
+            'incorrect_count': incorrect_count,
+            'incorrect_records': incorrect_records,
+            'failed_temp_row_ids': failed_temp_row_ids,
+            'total_records': len(validation_data),
+        }
+    except Exception as e:
+        return _validation_exception_result('discount requires remaining cycles validation', e)
+
+
+# (validator_fn, step key, filename slug) — run pre-merge after status checks, before date format
+_CONDITIONAL_FIELD_VALIDATIONS = (
+    (
+        validate_paused_requires_paused_at,
+        'paused_requires_paused_at_validation',
+        'paused_missing_paused_at',
+    ),
+    (
+        validate_trialing_requires_trial_period,
+        'trialing_requires_trial_period_validation',
+        'trialing_invalid_trial_period',
+    ),
+    (
+        validate_discount_requires_remaining_cycles,
+        'discount_requires_remaining_cycles_validation',
+        'discount_invalid_remaining_cycles',
+    ),
+)
+
+
 def validate_date_format(subscriber_data, seller_name='', is_sandbox=False):
     """
     Validate date formats for subscription period and lifecycle fields.
@@ -2359,6 +2539,73 @@ PLEASE ENSURE ALL COLUMNS HEADERS HAVE NO HIDDEN WHITE SPACES
                         'This is an informational alert only, subscriptions will still be included.'
                     ),
                 })
+
+    # Conditional field validations (paused_at / trial period / discount cycles) — before date format
+    for validation_fn, step_key, file_slug in _CONDITIONAL_FIELD_VALIDATIONS:
+        print(f"Validating {step_key}...")
+        col_validation = None
+        try:
+            col_validation = validation_fn(subscribedata, seller_name, is_sandbox)
+        except Exception as e:
+            print(f"Error during {step_key}: {e}")
+            validation_results.append({
+                'valid': False,
+                'step': step_key,
+                'error': f'Validation error: {str(e)}',
+                'incorrect_count': 0,
+                'total_records': 0,
+                'download_file': None,
+            })
+            continue
+
+        if not col_validation['valid']:
+            err = col_validation.get('error')
+            if err:
+                print(f"{step_key} failed: {err}")
+            else:
+                print(
+                    f"{step_key} failed. Found "
+                    f"{col_validation['incorrect_count']} records."
+                )
+            download_file = None
+            if col_validation.get('incorrect_records') is not None:
+                try:
+                    output_dir = 'outputs'
+                    os.makedirs(output_dir, exist_ok=True)
+                    clean_seller_name = "".join(
+                        c for c in seller_name if c.isalnum() or c in (' ', '-', '_')
+                    ).rstrip()
+                    clean_seller_name = clean_seller_name.replace(' ', '_')
+                    env_suffix = "_sandbox" if is_sandbox else "_production"
+                    incorrect_filename = (
+                        f"{clean_seller_name}_{file_slug}{env_suffix}_{int(time.time())}.csv"
+                    )
+                    incorrect_path = os.path.join(output_dir, incorrect_filename)
+                    col_validation['incorrect_records'].to_csv(incorrect_path, index=False)
+                    download_file = incorrect_filename
+                    print(f"Saved incorrect records to: {incorrect_path}")
+                except Exception as save_err:
+                    print(f"Error saving incorrect records file: {save_err}")
+
+            merge_failed_temp_row_ids_into_set(failed_row_ids, col_validation)
+            validation_results.append({
+                'valid': False,
+                'step': step_key,
+                'incorrect_count': col_validation['incorrect_count'],
+                'total_records': col_validation['total_records'],
+                'download_file': download_file,
+                **({'error': err} if err else {}),
+            })
+        else:
+            print(
+                f"{step_key} passed for all "
+                f"{col_validation['total_records']} records."
+            )
+            validation_results.append({
+                'valid': True,
+                'step': step_key,
+                'total_records': col_validation['total_records'],
+            })
 
     # Unsupported Countries Validation
     print("Validating unsupported countries...")

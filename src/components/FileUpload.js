@@ -9,6 +9,9 @@ const LEGACY_SINGLE_STEP_VALIDATION_STEPS = [
   'currency_code_presence_validation',
   'collection_mode_presence_validation',
   'subscription_external_id_presence_validation',
+  'paused_requires_paused_at_validation',
+  'trialing_requires_trial_period_validation',
+  'discount_requires_remaining_cycles_validation',
   'date_format_validation',
   'date_validation',
   'address_country_code_validation',
@@ -651,6 +654,9 @@ const FileUpload = ({ onProcessingComplete }) => {
           {currentValidationStep === 'currency_code_presence_validation' && 'Currency code validation in progress...'}
           {currentValidationStep === 'collection_mode_presence_validation' && 'Collection mode validation in progress...'}
           {currentValidationStep === 'subscription_external_id_presence_validation' && 'Subscription external ID validation in progress...'}
+          {currentValidationStep === 'paused_requires_paused_at_validation' && 'Paused status paused_at validation in progress...'}
+          {currentValidationStep === 'trialing_requires_trial_period_validation' && 'Trialing trial period validation in progress...'}
+          {currentValidationStep === 'discount_requires_remaining_cycles_validation' && 'Discount remaining cycles validation in progress...'}
           {currentValidationStep === 'date_format_validation' && 'Date format validation in progress...'}
           {currentValidationStep === 'date_validation' && 'Date validation in progress...'}
           {currentValidationStep === 'ca_zip_code_validation' && 'Canadian zip code validation in progress...'}
@@ -738,6 +744,12 @@ const FileUpload = ({ onProcessingComplete }) => {
                 ? (validation.valid ? 'Collection mode validation passed' : (isUnableToValidate ? 'Collection mode validation - Unable to validate' : `Collection mode validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
                 : validation.step === 'subscription_external_id_presence_validation'
                 ? (validation.valid ? 'Subscription external ID validation passed' : (isUnableToValidate ? 'Subscription external ID validation - Unable to validate' : `Subscription external ID validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
+                : validation.step === 'paused_requires_paused_at_validation'
+                ? (validation.valid ? 'Paused status paused_at validation passed' : (isUnableToValidate ? 'Paused status paused_at validation - Unable to validate' : `Paused status paused_at validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
+                : validation.step === 'trialing_requires_trial_period_validation'
+                ? (validation.valid ? 'Trialing trial period validation passed' : (isUnableToValidate ? 'Trialing trial period validation - Unable to validate' : `Trialing trial period validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
+                : validation.step === 'discount_requires_remaining_cycles_validation'
+                ? (validation.valid ? 'Discount remaining cycles validation passed' : (isUnableToValidate ? 'Discount remaining cycles validation - Unable to validate' : `Discount remaining cycles validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`))
                 : validation.step === 'date_format_validation'
                 ? (validation.valid ? 'Date format validation passed' : `Date format validation failed${validation.incorrect_count !== undefined ? ` (${validation.incorrect_count})` : ''}`)
                 : validation.step === 'date_validation'
@@ -811,6 +823,9 @@ const FileUpload = ({ onProcessingComplete }) => {
            !(validation.step === 'currency_code_presence_validation' && validation.valid) &&
            !(validation.step === 'collection_mode_presence_validation' && validation.valid) &&
            !(validation.step === 'subscription_external_id_presence_validation' && validation.valid) &&
+           !(validation.step === 'paused_requires_paused_at_validation' && validation.valid) &&
+           !(validation.step === 'trialing_requires_trial_period_validation' && validation.valid) &&
+           !(validation.step === 'discount_requires_remaining_cycles_validation' && validation.valid) &&
            !(validation.step === 'date_format_validation' && validation.valid) &&
            !(validation.step === 'date_validation' && validation.valid) &&
            !(validation.step === 'ca_zip_code_validation' && validation.valid) &&
@@ -976,6 +991,54 @@ const FileUpload = ({ onProcessingComplete }) => {
                     ) : (
                       <>
                         <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with missing subscription external ID.</strong></p>
+                        <p>Click the download icon to get a report of all incorrect records.</p>
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : validation.step === 'paused_requires_paused_at_validation' ? (
+              <>
+                {!validation.valid && (
+                  <div className="missing-columns">
+                    {validation.error ? (
+                      <p><strong>{validation.error}</strong></p>
+                    ) : (
+                      <>
+                        <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} paused rows with a missing <code>paused_at</code> value.</strong></p>
+                        <p>When <code>status</code> is <code>paused</code>, <code>paused_at</code> must have a value.</p>
+                        <p>Click the download icon to get a report of all incorrect records.</p>
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : validation.step === 'trialing_requires_trial_period_validation' ? (
+              <>
+                {!validation.valid && (
+                  <div className="missing-columns">
+                    {validation.error ? (
+                      <p><strong>{validation.error}</strong></p>
+                    ) : (
+                      <>
+                        <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} trialing rows with invalid trial period fields.</strong></p>
+                        <p>When <code>status</code> is <code>trialing</code>, <code>trial_period_frequency</code> must be a non-negative integer (e.g. <code>0</code>, <code>14</code>) and <code>trial_period_interval</code> must be one of <code>day</code>, <code>week</code>, <code>month</code>, or <code>year</code>.</p>
+                        <p>Click the download icon to get a report of all incorrect records.</p>
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            ) : validation.step === 'discount_requires_remaining_cycles_validation' ? (
+              <>
+                {!validation.valid && (
+                  <div className="missing-columns">
+                    {validation.error ? (
+                      <p><strong>{validation.error}</strong></p>
+                    ) : (
+                      <>
+                        <p><strong>Found {validation.incorrect_count !== undefined ? validation.incorrect_count : 0} rows with a discount ID but invalid <code>discount_remaining_cycles</code>.</strong></p>
+                        <p>When <code>discount_id</code> is set, <code>discount_remaining_cycles</code> must be a non-negative integer (e.g. <code>0</code>, <code>3</code>). Values like <code>2.0</code> are not allowed.</p>
                         <p>Click the download icon to get a report of all incorrect records.</p>
                       </>
                     )}
